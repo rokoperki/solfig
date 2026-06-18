@@ -1,5 +1,9 @@
 # SOLFIG
 
+[![CI](https://github.com/rokoperki/solfig/actions/workflows/ci.yml/badge.svg)](https://github.com/rokoperki/solfig/actions/workflows/ci.yml)
+[![crates.io](https://img.shields.io/crates/v/solfig.svg)](https://crates.io/crates/solfig)
+[![license: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](#license)
+
 A terminal UI for the Solana CLI config. Edit your cluster, keypair, commitment,
 and websocket in `~/.config/solana/cli/config.yml` while watching live cluster
 telemetry and your wallet balance — without hand-editing YAML or memorizing
@@ -36,7 +40,7 @@ telemetry and your wallet balance — without hand-editing YAML or memorizing
 
 ## Install
 
-From source:
+From source (until published to crates.io):
 
 ```sh
 git clone https://github.com/rokoperki/solfig
