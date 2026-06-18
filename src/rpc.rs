@@ -53,7 +53,10 @@ pub enum Request {
     Telemetry(String),
     Stats(String),
     Price,
-    Balance { url: String, pubkey: String },
+    Balance {
+        url: String,
+        pubkey: String,
+    },
     Airdrop {
         url: String,
         pubkey: String,
@@ -90,6 +93,9 @@ pub struct Rpc {
 }
 
 impl Rpc {
+    // `new` spawns background worker threads, so a trivial `Default` would
+    // misrepresent the cost; construct it explicitly.
+    #[allow(clippy::new_without_default)]
     pub fn new() -> Self {
         let (gen_tx, gen_rx) = channel::<Request>();
         let (bal_tx, bal_rx) = channel::<Request>();
@@ -291,7 +297,11 @@ fn probe_tps(url: &str) -> u64 {
 
 fn probe_balance(url: &str, pubkey: &str) -> Balance {
     // Use `confirmed` so balances reflect just-confirmed txs (default is finalized).
-    match rpc_call(url, "getBalance", json!([pubkey, {"commitment": "confirmed"}])) {
+    match rpc_call(
+        url,
+        "getBalance",
+        json!([pubkey, {"commitment": "confirmed"}]),
+    ) {
         Ok(v) => {
             if let Some(lamports) = v["result"]["value"].as_u64() {
                 Balance::Lamports(lamports)
@@ -375,7 +385,9 @@ fn run_transfer(
                 .trim();
             let sig_short: String = sig.chars().take(8).collect();
             let _ = res_tx.send(Response::Balance(probe_balance(url, pubkey)));
-            let _ = res_tx.send(Response::Notice(format!("transfer confirmed ({sig_short}…)")));
+            let _ = res_tx.send(Response::Notice(format!(
+                "transfer confirmed ({sig_short}…)"
+            )));
         }
         Ok(o) => {
             let err = String::from_utf8_lossy(&o.stderr);

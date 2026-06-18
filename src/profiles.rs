@@ -21,7 +21,7 @@ pub fn list() -> Vec<Profile> {
     if let Ok(rd) = std::fs::read_dir(profiles_dir()) {
         for entry in rd.flatten() {
             let path = entry.path();
-            if path.extension().map_or(false, |e| e == "yml") {
+            if path.extension().is_some_and(|e| e == "yml") {
                 let name = path
                     .file_stem()
                     .map(|s| s.to_string_lossy().to_string())

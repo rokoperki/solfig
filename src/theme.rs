@@ -53,17 +53,17 @@ impl Theme {
     /// Neon synthwave — a dracula base with hot-pink/cyan highlights.
     fn synthwave() -> Self {
         Self {
-            accent: rgb(255, 106, 193),  // hot pink
+            accent: rgb(255, 106, 193), // hot pink
             dim: rgb(98, 114, 164),
             highlight: rgb(68, 71, 90),
             text: rgb(248, 248, 242),
             muted: rgb(98, 114, 164),
-            success: rgb(54, 249, 246),  // neon cyan
+            success: rgb(54, 249, 246), // neon cyan
             warning: rgb(254, 222, 93),
             error: rgb(254, 68, 80),
             on_accent: rgb(40, 42, 54),
             mainnet: rgb(255, 85, 85),
-            devnet: rgb(114, 241, 184),  // mint
+            devnet: rgb(114, 241, 184), // mint
             testnet: rgb(241, 250, 140),
             localhost: rgb(139, 233, 253),
             custom: rgb(184, 147, 206),

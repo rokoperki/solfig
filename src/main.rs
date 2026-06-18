@@ -1,15 +1,7 @@
-mod app;
-mod config;
-mod endpoints;
-mod faucets;
-mod profiles;
-mod rpc;
-mod theme;
-mod ui;
-
-use app::App;
 use crossterm::event::{self, Event, KeyEventKind};
-use rpc::{Balance, ClusterStats, Health, Price, Request, Response, Rpc, Telemetry};
+use solfig::app::App;
+use solfig::rpc::{Balance, ClusterStats, Health, Price, Request, Response, Rpc, Telemetry};
+use solfig::{config, ui};
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 

@@ -166,9 +166,26 @@ pub fn generate_keypair() -> anyhow::Result<(String, String)> {
 
     let signing = SigningKey::generate(&mut OsRng);
     let bytes = signing.to_keypair_bytes(); // [secret(32) | public(32)]
-    std::fs::write(&path, serde_json::to_string(&bytes.to_vec())?)?;
+
+    // Private key — owner-only perms, matching `solana-keygen` (0600).
+    write_secret(&path, serde_json::to_string(&bytes.to_vec())?.as_bytes())?;
     let pubkey = bs58::encode(&bytes[32..]).into_string();
     Ok((path.to_string_lossy().into_owned(), pubkey))
+}
+
+/// Write a file containing secret material so only the owner can read it.
+/// On Unix the file is created with `0600` up front (no world-readable window);
+/// on other platforms it falls back to a plain write.
+pub fn write_secret(path: &Path, contents: &[u8]) -> std::io::Result<()> {
+    use std::io::Write;
+    let mut opts = std::fs::OpenOptions::new();
+    opts.write(true).create(true).truncate(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        opts.mode(0o600);
+    }
+    opts.open(path)?.write_all(contents)
 }
 
 /// Render a path with a leading `~` when it lives under the home directory.
@@ -212,7 +229,7 @@ pub fn scan_keypairs(current: &str) -> Vec<KeyFile> {
         };
         for entry in rd.flatten() {
             let path = entry.path();
-            if path.extension().map_or(false, |e| e == "json") {
+            if path.extension().is_some_and(|e| e == "json") {
                 // Keypair files are tiny; skip anything large to avoid slow reads.
                 let small = entry.metadata().map(|m| m.len() < 2048).unwrap_or(false);
                 if !small {

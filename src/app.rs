@@ -188,10 +188,10 @@ impl App {
                 }
             }
             KeyCode::Down | KeyCode::Char('j') => {
-                self.sel = (self.sel + 1) % FIELDS.len();
+                self.sel = wrap_index(self.sel, 1, FIELDS.len());
             }
             KeyCode::Up | KeyCode::Char('k') => {
-                self.sel = (self.sel + FIELDS.len() - 1) % FIELDS.len();
+                self.sel = wrap_index(self.sel, -1, FIELDS.len());
             }
             KeyCode::Left | KeyCode::Char('h') => self.adjust(-1),
             KeyCode::Right | KeyCode::Char('l') => self.adjust(1),
@@ -219,9 +219,7 @@ impl App {
             .iter()
             .position(|s| (*s - self.airdrop_sol).abs() < f64::EPSILON)
             .unwrap_or(1);
-        let n = AIRDROP_STEPS.len() as i32;
-        let next = ((cur as i32 + delta) % n + n) % n;
-        self.airdrop_sol = AIRDROP_STEPS[next as usize];
+        self.airdrop_sol = AIRDROP_STEPS[wrap_index(cur, delta, AIRDROP_STEPS.len())];
         self.status = format!("airdrop amount: {} SOL", self.airdrop_sol);
     }
 
@@ -290,7 +288,10 @@ impl App {
             Some("devnet") => "?cluster=devnet".to_string(),
             Some("testnet") => "?cluster=testnet".to_string(),
             // localhost or any custom endpoint → point Explorer at the raw URL
-            _ => format!("?cluster=custom&customUrl={}", url_encode(&self.cfg.json_rpc_url)),
+            _ => format!(
+                "?cluster=custom&customUrl={}",
+                url_encode(&self.cfg.json_rpc_url)
+            ),
         }
     }
 
@@ -303,9 +304,7 @@ impl App {
                     .iter()
                     .position(|(_, u)| *u == self.cfg.json_rpc_url)
                     .unwrap_or(0);
-                let n = list.len() as i32;
-                let next = ((cur as i32 + delta) % n + n) % n;
-                self.cfg.json_rpc_url = list[next as usize].1.clone();
+                self.cfg.json_rpc_url = list[wrap_index(cur, delta, list.len())].1.clone();
                 self.dirty = true;
                 self.need_health_check = true;
                 self.need_balance_check = true;
@@ -315,9 +314,8 @@ impl App {
                     .iter()
                     .position(|c| *c == self.cfg.commitment)
                     .unwrap_or(1);
-                let n = COMMITMENTS.len() as i32;
-                let next = ((cur as i32 + delta) % n + n) % n;
-                self.cfg.commitment = COMMITMENTS[next as usize].to_string();
+                self.cfg.commitment =
+                    COMMITMENTS[wrap_index(cur, delta, COMMITMENTS.len())].to_string();
                 self.dirty = true;
             }
             _ => {}
@@ -414,16 +412,8 @@ impl App {
         let matches = self.filtered_keys();
         match key.code {
             KeyCode::Esc => self.mode = Mode::Normal,
-            KeyCode::Down => {
-                if !matches.is_empty() {
-                    self.key_sel = (self.key_sel + 1) % matches.len();
-                }
-            }
-            KeyCode::Up => {
-                if !matches.is_empty() {
-                    self.key_sel = (self.key_sel + matches.len() - 1) % matches.len();
-                }
-            }
+            KeyCode::Down => self.key_sel = wrap_index(self.key_sel, 1, matches.len()),
+            KeyCode::Up => self.key_sel = wrap_index(self.key_sel, -1, matches.len()),
             KeyCode::Enter => {
                 if let Some(&idx) = matches.get(self.key_sel) {
                     self.cfg.keypair_path = self.key_files[idx].path.clone();
@@ -477,15 +467,10 @@ impl App {
                 self.mode = Mode::Normal;
             }
             KeyCode::Down | KeyCode::Char('j') => {
-                if !self.profiles.is_empty() {
-                    self.prof_sel = (self.prof_sel + 1) % self.profiles.len();
-                }
+                self.prof_sel = wrap_index(self.prof_sel, 1, self.profiles.len());
             }
             KeyCode::Up | KeyCode::Char('k') => {
-                if !self.profiles.is_empty() {
-                    self.prof_sel =
-                        (self.prof_sel + self.profiles.len() - 1) % self.profiles.len();
-                }
+                self.prof_sel = wrap_index(self.prof_sel, -1, self.profiles.len());
             }
             KeyCode::Enter => self.activate_profile(),
             KeyCode::Char('n') => {
@@ -561,15 +546,10 @@ impl App {
                 self.mode = Mode::Normal;
             }
             KeyCode::Down | KeyCode::Char('j') => {
-                if !self.endpoints.is_empty() {
-                    self.ep_sel = (self.ep_sel + 1) % self.endpoints.len();
-                }
+                self.ep_sel = wrap_index(self.ep_sel, 1, self.endpoints.len());
             }
             KeyCode::Up | KeyCode::Char('k') => {
-                if !self.endpoints.is_empty() {
-                    self.ep_sel =
-                        (self.ep_sel + self.endpoints.len() - 1) % self.endpoints.len();
-                }
+                self.ep_sel = wrap_index(self.ep_sel, -1, self.endpoints.len());
             }
             KeyCode::Enter => {
                 if let Some(ep) = self.endpoints.get(self.ep_sel) {
@@ -636,15 +616,10 @@ impl App {
                 self.mode = Mode::Normal;
             }
             KeyCode::Down | KeyCode::Char('j') => {
-                if !self.faucets.is_empty() {
-                    self.faucet_sel = (self.faucet_sel + 1) % self.faucets.len();
-                }
+                self.faucet_sel = wrap_index(self.faucet_sel, 1, self.faucets.len());
             }
             KeyCode::Up | KeyCode::Char('k') => {
-                if !self.faucets.is_empty() {
-                    self.faucet_sel =
-                        (self.faucet_sel + self.faucets.len() - 1) % self.faucets.len();
-                }
+                self.faucet_sel = wrap_index(self.faucet_sel, -1, self.faucets.len());
             }
             KeyCode::Enter => self.launch_faucet(),
             KeyCode::Char('n') => {
@@ -671,7 +646,11 @@ impl App {
         let name = faucet.name.clone();
         let url = faucet.url.clone();
         let copied = config::pubkey_from_keypair(&self.cfg.keypair_path)
-            .and_then(|pk| arboard::Clipboard::new().and_then(|mut c| c.set_text(pk)).ok())
+            .and_then(|pk| {
+                arboard::Clipboard::new()
+                    .and_then(|mut c| c.set_text(pk))
+                    .ok()
+            })
             .is_some();
         self.status = match open_url(&url) {
             Ok(()) if copied => format!("opened {name} — pubkey copied to clipboard"),
@@ -747,9 +726,7 @@ impl App {
                 }
             }
             KeyCode::Enter => {
-                if !self.tx_to.is_empty()
-                    && self.tx_amount.parse::<f64>().is_ok_and(|a| a > 0.0)
-                {
+                if !self.tx_to.is_empty() && self.tx_amount.parse::<f64>().is_ok_and(|a| a > 0.0) {
                     self.mode = Mode::TransferConfirm;
                 } else {
                     self.status = "enter a recipient and a positive amount".to_string();
@@ -817,11 +794,11 @@ impl App {
                 self.mode = Mode::Normal;
             }
             KeyCode::Down | KeyCode::Char('j') if count > 0 => {
-                self.theme_sel = (self.theme_sel + 1) % count;
+                self.theme_sel = wrap_index(self.theme_sel, 1, count);
                 self.preview_theme();
             }
             KeyCode::Up | KeyCode::Char('k') if count > 0 => {
-                self.theme_sel = (self.theme_sel + count - 1) % count;
+                self.theme_sel = wrap_index(self.theme_sel, -1, count);
                 self.preview_theme();
             }
             KeyCode::Enter => {
@@ -839,14 +816,24 @@ impl App {
     }
 }
 
+/// Step an index by `delta` within `[0, len)`, wrapping around both ends.
+/// Returns 0 for an empty list. Used everywhere a selection cycles.
+pub fn wrap_index(cur: usize, delta: i32, len: usize) -> usize {
+    if len == 0 {
+        return 0;
+    }
+    let n = len as i32;
+    (((cur as i32 + delta) % n + n) % n) as usize
+}
+
 /// True if every char of `needle` appears in `hay` in order.
-fn is_subsequence(needle: &str, hay: &str) -> bool {
+pub fn is_subsequence(needle: &str, hay: &str) -> bool {
     let mut chars = hay.chars();
     needle.chars().all(|c| chars.any(|h| h == c))
 }
 
 /// Percent-encode a string for use as a URL query-parameter value.
-fn url_encode(s: &str) -> String {
+pub fn url_encode(s: &str) -> String {
     let mut out = String::new();
     for b in s.bytes() {
         match b {

@@ -320,7 +320,7 @@ fn render_sidebar(
 }
 
 /// Format a slot count as a rough epoch ETA (slots × ~0.4s).
-fn format_eta(slots: u64) -> String {
+pub fn format_eta(slots: u64) -> String {
     let secs = (slots as f64 * 0.4) as u64;
     let (d, h, m) = (secs / 86400, (secs % 86400) / 3600, (secs % 3600) / 60);
     if d > 0 {
@@ -333,7 +333,7 @@ fn format_eta(slots: u64) -> String {
 }
 
 /// Abbreviate large counts: 1.23B / 4.56M / else thousands-separated.
-fn abbrev(n: u64) -> String {
+pub fn abbrev(n: u64) -> String {
     if n >= 1_000_000_000 {
         format!("{:.2}B", n as f64 / 1e9)
     } else if n >= 1_000_000 {
@@ -344,7 +344,7 @@ fn abbrev(n: u64) -> String {
 }
 
 /// `▓▓▓░░░ 42%` style progress bar filling the given width.
-fn progress_bar(ratio: f64, width: usize) -> String {
+pub fn progress_bar(ratio: f64, width: usize) -> String {
     let label = format!(" {:>3.0}%", (ratio * 100.0).clamp(0.0, 100.0));
     let bar_w = width.saturating_sub(label.chars().count());
     let filled = ((ratio * bar_w as f64).round() as usize).min(bar_w);
@@ -357,12 +357,12 @@ fn progress_bar(ratio: f64, width: usize) -> String {
 }
 
 /// Format a number with thousands separators.
-fn group_thousands(n: u64) -> String {
+pub fn group_thousands(n: u64) -> String {
     let s = n.to_string();
     let len = s.len();
     let mut out = String::new();
     for (i, c) in s.chars().enumerate() {
-        if i > 0 && (len - i) % 3 == 0 {
+        if i > 0 && (len - i).is_multiple_of(3) {
             out.push(',');
         }
         out.push(c);
@@ -387,7 +387,10 @@ fn hazard_banner(width: usize) -> Line<'static> {
 
 fn marker(focused: bool) -> Span<'static> {
     if focused {
-        Span::styled(" ◆ ", Style::new().fg(theme().accent).add_modifier(Modifier::BOLD))
+        Span::styled(
+            " ◆ ",
+            Style::new().fg(theme().accent).add_modifier(Modifier::BOLD),
+        )
     } else {
         Span::raw("   ")
     }
@@ -420,9 +423,10 @@ fn field_lines<'a>(
 fn balance_span(balance: &Balance) -> Span<'static> {
     match balance {
         Balance::Unknown => Span::raw(""),
-        Balance::Loading => {
-            Span::styled(format!("  ◎ {}", spinner()), Style::new().fg(theme().warning))
-        }
+        Balance::Loading => Span::styled(
+            format!("  ◎ {}", spinner()),
+            Style::new().fg(theme().warning),
+        ),
         Balance::Lamports(l) => Span::styled(
             format!("  ◎ {:.4} SOL", *l as f64 / 1_000_000_000.0),
             Style::new().fg(theme().success),
@@ -481,12 +485,18 @@ fn cluster_lines(app: &App, focused: bool, editing: bool) -> Vec<Line<'static>> 
 
     let detail = if editing {
         Line::from(vec![
-            Span::styled(format!("{}└ ", " ".repeat(12)), Style::new().fg(theme().dim)),
+            Span::styled(
+                format!("{}└ ", " ".repeat(12)),
+                Style::new().fg(theme().dim),
+            ),
             Span::styled(format!("{}▊", app.buf), Style::new().fg(theme().warning)),
         ])
     } else {
         Line::from(vec![
-            Span::styled(format!("{}└ ", " ".repeat(12)), Style::new().fg(theme().dim)),
+            Span::styled(
+                format!("{}└ ", " ".repeat(12)),
+                Style::new().fg(theme().dim),
+            ),
             Span::styled(app.cfg.json_rpc_url.clone(), Style::new().fg(theme().dim)),
         ])
     };
@@ -534,7 +544,10 @@ fn commitment_line(app: &App, focused: bool) -> Line<'static> {
                 Style::new().fg(theme().accent).add_modifier(Modifier::BOLD),
             ));
         } else {
-            spans.push(Span::styled(format!(" {c}  "), Style::new().fg(theme().dim)));
+            spans.push(Span::styled(
+                format!(" {c}  "),
+                Style::new().fg(theme().dim),
+            ));
         }
     }
     Line::from(spans)
@@ -867,7 +880,10 @@ fn render_transfer(f: &mut Frame, app: &App) {
 
 fn field_marker(focused: bool) -> Span<'static> {
     if focused {
-        Span::styled("  › ", Style::new().fg(theme().accent).add_modifier(Modifier::BOLD))
+        Span::styled(
+            "  › ",
+            Style::new().fg(theme().accent).add_modifier(Modifier::BOLD),
+        )
     } else {
         Span::raw("    ")
     }
@@ -1049,7 +1065,7 @@ fn render_list(
     }
 }
 
-fn centered(width: u16, height: u16, area: Rect) -> Rect {
+pub fn centered(width: u16, height: u16, area: Rect) -> Rect {
     let w = width.min(area.width);
     let h = height.min(area.height);
     let x = area.x + (area.width.saturating_sub(w)) / 2;
