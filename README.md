@@ -36,7 +36,7 @@ telemetry and your wallet balance — without hand-editing YAML or memorizing
 
 ## Install
 
-From source (until published to crates.io):
+From source:
 
 ```sh
 git clone https://github.com/rokoperki/solfig
