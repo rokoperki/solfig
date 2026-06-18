@@ -140,6 +140,37 @@ pub fn pubkey_from_keypair(path: &str) -> Option<String> {
     Some(bs58::encode(&bytes[32..]).into_string())
 }
 
+/// Generate a fresh ed25519 keypair and write it as a Solana JSON keypair.
+/// Writes `~/.config/solana/id.json` if free, else a timestamped file, never
+/// overwriting an existing keypair. Returns (absolute_path, pubkey).
+pub fn generate_keypair() -> anyhow::Result<(String, String)> {
+    use ed25519_dalek::SigningKey;
+    use rand::rngs::OsRng;
+
+    let mut dir = dirs::home_dir().unwrap_or_default();
+    dir.push(".config/solana");
+    std::fs::create_dir_all(&dir)?;
+
+    let path = {
+        let id = dir.join("id.json");
+        if id.exists() {
+            let ts = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0);
+            dir.join(format!("keypair-{ts}.json"))
+        } else {
+            id
+        }
+    };
+
+    let signing = SigningKey::generate(&mut OsRng);
+    let bytes = signing.to_keypair_bytes(); // [secret(32) | public(32)]
+    std::fs::write(&path, serde_json::to_string(&bytes.to_vec())?)?;
+    let pubkey = bs58::encode(&bytes[32..]).into_string();
+    Ok((path.to_string_lossy().into_owned(), pubkey))
+}
+
 /// Render a path with a leading `~` when it lives under the home directory.
 pub fn display_path(p: &Path) -> String {
     let s = p.to_string_lossy().to_string();

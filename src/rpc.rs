@@ -159,9 +159,13 @@ fn run_airdrop(res_tx: &Sender<Response>, url: &str, pubkey: &str, lamports: u64
                 let _ = res_tx.send(Response::Notice(format!(
                     "airdrop sent ({short}…), confirming"
                 )));
-                thread::sleep(Duration::from_secs(3));
+                let outcome = confirm_signature(url, sig);
                 let _ = res_tx.send(Response::Balance(probe_balance(url, pubkey)));
-                let _ = res_tx.send(Response::Notice("airdrop balance refreshed".to_string()));
+                let _ = res_tx.send(Response::Notice(match outcome {
+                    Confirm::Confirmed => "airdrop confirmed".to_string(),
+                    Confirm::Failed(e) => format!("airdrop tx failed: {e}"),
+                    Confirm::Timeout => "airdrop still pending — balance may lag".to_string(),
+                }));
             } else {
                 let msg = v["error"]["message"].as_str().unwrap_or("airdrop rejected");
                 let _ = res_tx.send(Response::Notice(airdrop_error(msg)));
@@ -171,6 +175,34 @@ fn run_airdrop(res_tx: &Sender<Response>, url: &str, pubkey: &str, lamports: u64
             let _ = res_tx.send(Response::Notice(airdrop_error(&e)));
         }
     }
+}
+
+enum Confirm {
+    Confirmed,
+    Failed(String),
+    Timeout,
+}
+
+/// Poll `getSignatureStatuses` until the tx confirms, fails, or times out (~15s).
+fn confirm_signature(url: &str, sig: &str) -> Confirm {
+    for _ in 0..15 {
+        thread::sleep(Duration::from_secs(1));
+        let Ok(v) = rpc_call(url, "getSignatureStatuses", json!([[sig]])) else {
+            continue;
+        };
+        let status = &v["result"]["value"][0];
+        if !status.is_object() {
+            continue; // not yet visible to the RPC
+        }
+        if status["err"].is_object() {
+            return Confirm::Failed(status["err"].to_string());
+        }
+        match status["confirmationStatus"].as_str() {
+            Some("confirmed") | Some("finalized") => return Confirm::Confirmed,
+            _ => {}
+        }
+    }
+    Confirm::Timeout
 }
 
 /// Turn a raw airdrop error into a friendlier, actionable message.

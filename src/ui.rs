@@ -236,11 +236,13 @@ fn render_help(f: &mut Frame, app: &App, area: Rect) {
     } else {
         match app.mode {
             Mode::Normal => format!(
-                " ↑↓ field  ←→ pick  ⏎ edit  a airdrop {}◎(±)  y copy  e endpoints  f faucet  p profiles  s save  q quit",
+                " ↑↓ field  ←→ pick  ⏎ edit  a airdrop {}◎(±)  o explorer  y copy  e endpoints  f faucet  p profiles  s save  q quit",
                 app.airdrop_sol
             ),
             Mode::EditField => " type value   ⏎ confirm   esc cancel".to_string(),
-            Mode::KeyPicker => " type to filter   ↑↓ select   ⏎ choose   esc back".to_string(),
+            Mode::KeyPicker => {
+                " type to filter   ↑↓ select   ⏎ choose   g generate new   esc back".to_string()
+            }
             Mode::Profiles => " ↑↓ select   ⏎ activate   n new   d delete   esc back".to_string(),
             Mode::NewProfile => {
                 " type name   ⏎ save current config as profile   esc back".to_string()

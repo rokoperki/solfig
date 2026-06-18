@@ -166,6 +166,7 @@ impl App {
             KeyCode::Char('+') | KeyCode::Char('=') => self.cycle_airdrop(1),
             KeyCode::Char('-') | KeyCode::Char('_') => self.cycle_airdrop(-1),
             KeyCode::Char('y') => self.copy_field(),
+            KeyCode::Char('o') => self.open_explorer(),
             KeyCode::Char('e') => self.open_endpoints(),
             KeyCode::Char('f') => self.open_faucets(),
             KeyCode::Char('s') => self.save(),
@@ -226,6 +227,33 @@ impl App {
         match arboard::Clipboard::new().and_then(|mut c| c.set_text(value)) {
             Ok(()) => self.status = format!("copied {what}"),
             Err(e) => self.status = format!("copy failed: {e}"),
+        }
+    }
+
+    /// Open the keypair's address in Solana Explorer for the active cluster.
+    fn open_explorer(&mut self) {
+        let Some(pubkey) = config::pubkey_from_keypair(&self.cfg.keypair_path) else {
+            self.status = "no valid keypair to open".to_string();
+            return;
+        };
+        let url = format!(
+            "https://explorer.solana.com/address/{pubkey}{}",
+            self.explorer_cluster_param()
+        );
+        self.status = match open_url(&url) {
+            Ok(()) => "opened explorer".to_string(),
+            Err(e) => format!("open failed: {e}"),
+        };
+    }
+
+    /// The `?cluster=…` suffix Explorer needs for the active RPC.
+    fn explorer_cluster_param(&self) -> String {
+        match config::moniker_for_url(&self.cfg.json_rpc_url) {
+            Some("mainnet-beta") => String::new(),
+            Some("devnet") => "?cluster=devnet".to_string(),
+            Some("testnet") => "?cluster=testnet".to_string(),
+            // localhost or any custom endpoint → point Explorer at the raw URL
+            _ => format!("?cluster=custom&customUrl={}", url_encode(&self.cfg.json_rpc_url)),
         }
     }
 
@@ -372,11 +400,31 @@ impl App {
                 self.key_filter.pop();
                 self.key_sel = 0;
             }
+            KeyCode::Char('g') if self.key_filter.is_empty() => self.generate_keypair(),
             KeyCode::Char(c) => {
                 self.key_filter.push(c);
                 self.key_sel = 0;
             }
             _ => {}
+        }
+    }
+
+    /// Generate a fresh keypair, select it, and refresh the picker list.
+    fn generate_keypair(&mut self) {
+        match config::generate_keypair() {
+            Ok((path, pubkey)) => {
+                self.cfg.keypair_path = path;
+                self.dirty = true;
+                self.need_balance_check = true;
+                let short = format!(
+                    "{}...{}",
+                    &pubkey[..4.min(pubkey.len())],
+                    &pubkey[pubkey.len().saturating_sub(4)..]
+                );
+                self.status = format!("generated {short}");
+                self.mode = Mode::Normal;
+            }
+            Err(e) => self.status = format!("keygen failed: {e}"),
         }
     }
 
@@ -628,6 +676,20 @@ impl App {
 fn is_subsequence(needle: &str, hay: &str) -> bool {
     let mut chars = hay.chars();
     needle.chars().all(|c| chars.any(|h| h == c))
+}
+
+/// Percent-encode a string for use as a URL query-parameter value.
+fn url_encode(s: &str) -> String {
+    let mut out = String::new();
+    for b in s.bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(b as char)
+            }
+            _ => out.push_str(&format!("%{b:02X}")),
+        }
+    }
+    out
 }
 
 /// Open a URL in the system default browser.
