@@ -17,8 +17,9 @@ telemetry and your wallet balance — without hand-editing YAML or memorizing
   websocket, written back atomically to `config.yml`.
 - **One-key cluster switching** — built-in monikers (mainnet-beta, devnet,
   testnet, localhost) plus your own saved endpoints.
-- **Live telemetry sidebar** — slot, block height, epoch progress + ETA, TPS,
-  validator count, delinquent (non-voting) validators, median priority fee,
+- **Live telemetry sidebar** — slot (with a live heartbeat that pulses each new
+  slot and flatlines when the chain stalls), block height, epoch progress + ETA,
+  TPS, validator count, delinquent (non-voting) validators, median priority fee,
   transaction count, circulating supply, SOL/USD price, and RPC ping/version.
   Values are cached per-cluster so switching is instant.
 - **Wallet** — derives and displays your pubkey and balance, requests airdrops
@@ -26,6 +27,8 @@ telemetry and your wallet balance — without hand-editing YAML or memorizing
 - **Keypair picker** — fuzzy-filter keypairs discovered under
   `~/.config/solana`, `~/Downloads`, and the current directory; generate a fresh
   one in place.
+- **Wallet labels** — name your wallets; labels are saved to the config's
+  `address_labels` (Solana-CLI compatible) and shown wherever an address appears.
 - **Custom RPC endpoints & web faucets** — save named endpoints and open faucets
   in your browser (copying your pubkey to the clipboard).
 - **Profiles** — save and switch between whole config environments.
@@ -92,6 +95,7 @@ Press `?` in the app for the full list. Summary:
 | `a` | Airdrop to the current keypair (non-mainnet) |
 | `+` / `-` | Change the airdrop amount |
 | `t` | Transfer SOL (`←→` toggles through local wallets) |
+| `n` | Label the current wallet (empty clears) |
 | `y` | Copy the focused field's value to the clipboard |
 | `o` | Open the address in Solana Explorer |
 | `e` | Custom RPC endpoints |

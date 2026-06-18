@@ -7,6 +7,7 @@ use ratatui::widgets::{
     Block, Borders, Clear, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, Wrap,
 };
 use std::path::Path;
+use std::time::Duration;
 
 /// ANSI Shadow "SOLFIG" wordmark.
 fn wordmark() -> [&'static str; 6] {
@@ -56,6 +57,7 @@ fn modal(f: &mut Frame, title: &str, width: u16, height: u16) -> Rect {
     inner
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn render(
     f: &mut Frame,
     app: &App,
@@ -64,6 +66,7 @@ pub fn render(
     telemetry: &Option<Telemetry>,
     stats: &Option<ClusterStats>,
     price: &Option<Price>,
+    beat_age: Option<Duration>,
 ) {
     let chunks = Layout::vertical([
         Constraint::Min(3),
@@ -77,7 +80,7 @@ pub fn render(
         let cols =
             Layout::horizontal([Constraint::Min(50), Constraint::Length(26)]).split(chunks[0]);
         render_body(f, app, balance, cols[0]);
-        render_sidebar(f, app, health, telemetry, stats, price, cols[1]);
+        render_sidebar(f, app, health, telemetry, stats, price, beat_age, cols[1]);
     } else {
         render_body(f, app, balance, chunks[0]);
     }
@@ -97,10 +100,13 @@ pub fn render(
         render_faucets(f, app);
     }
     if app.mode == Mode::Transfer || app.mode == Mode::TransferConfirm {
-        render_transfer(f, app);
+        render_transfer(f, app, balance);
     }
     if app.mode == Mode::Themes {
         render_themes(f, app);
+    }
+    if app.mode == Mode::Label {
+        render_label(f, app);
     }
     if app.mode == Mode::Help {
         render_help_panel(f);
@@ -167,6 +173,7 @@ fn render_body(f: &mut Frame, app: &App, balance: &Balance, area: Rect) {
     f.render_widget(Paragraph::new(lines), inner);
 }
 
+#[allow(clippy::too_many_arguments)]
 fn render_sidebar(
     f: &mut Frame,
     app: &App,
@@ -174,6 +181,7 @@ fn render_sidebar(
     telemetry: &Option<Telemetry>,
     stats: &Option<ClusterStats>,
     price: &Option<Price>,
+    beat_age: Option<Duration>,
     area: Rect,
 ) {
     let block = Block::default()
@@ -218,10 +226,11 @@ fn render_sidebar(
 
     match telemetry {
         Some(t) => {
-            lines.push(kv(
-                "slot",
+            lines.push(Line::from(vec![
+                Span::styled(format!(" {:<8}", "slot"), Style::new().fg(theme().dim)),
                 Span::styled(group_thousands(t.slot), Style::new().fg(theme().text)),
-            ));
+                heartbeat(beat_age),
+            ]));
             lines.push(kv(
                 "block",
                 Span::styled(
@@ -334,6 +343,21 @@ fn render_sidebar(
     ));
 
     f.render_widget(Paragraph::new(lines), inner);
+}
+
+/// Retro blip that pulses each time a new slot is observed and decays between
+/// beats; a stalled chain/RPC (no beat for a few seconds) shows a dim flatline.
+fn heartbeat(age: Option<Duration>) -> Span<'static> {
+    let t = theme();
+    match age {
+        Some(a) if a < Duration::from_millis(200) => Span::styled(
+            "  ●",
+            Style::new().fg(t.success).add_modifier(Modifier::BOLD),
+        ),
+        Some(a) if a < Duration::from_millis(500) => Span::styled("  ◦", Style::new().fg(t.text)),
+        Some(a) if a < Duration::from_secs(3) => Span::styled("  ·", Style::new().fg(t.dim)),
+        _ => Span::styled("  ─", Style::new().fg(t.dim)),
+    }
 }
 
 /// Format a slot count as a rough epoch ETA (slots × ~0.4s).
@@ -522,11 +546,18 @@ fn cluster_lines(app: &App, focused: bool, editing: bool) -> Vec<Line<'static>> 
 }
 
 fn keypair_lines(app: &App, focused: bool, balance: &Balance) -> Vec<Line<'static>> {
-    let head = Line::from(vec![
+    let mut head_spans = vec![
         marker(focused),
         label("Keypair", focused),
         Span::raw(config::display_path(Path::new(&app.cfg.keypair_path))),
-    ]);
+    ];
+    if let Some(name) = app.current_label() {
+        head_spans.push(Span::styled(
+            format!("  ❲{name}❳"),
+            Style::new().fg(theme().accent).add_modifier(Modifier::BOLD),
+        ));
+    }
+    let head = Line::from(head_spans);
 
     let detail = match config::pubkey_from_keypair(&app.cfg.keypair_path) {
         Some(pk) => {
@@ -629,7 +660,7 @@ fn render_help(f: &mut Frame, app: &App, area: Rect) {
     } else {
         match app.mode {
             Mode::Normal => format!(
-                " ↑↓ move   ←→ pick   ⏎ edit   a airdrop {}◎(±)   t transfer   s save   ? all keys   q quit",
+                " ↑↓ move   ←→ pick   ⏎ edit   a airdrop {}◎(±)   t transfer   n label   s save   ? all keys   q quit",
                 app.airdrop_sol
             ),
             Mode::EditField => " type value   ⏎ confirm   esc cancel".to_string(),
@@ -652,6 +683,7 @@ fn render_help(f: &mut Frame, app: &App, area: Rect) {
             }
             Mode::TransferConfirm => " ⏎ send   esc cancel".to_string(),
             Mode::Themes => " ↑↓ preview   ⏎ apply & save   esc cancel".to_string(),
+            Mode::Label => " type a label   ⏎ save (empty clears)   esc cancel".to_string(),
             Mode::Help => " esc / ? close".to_string(),
         }
     };
@@ -704,11 +736,18 @@ fn render_key_picker(f: &mut Frame, app: &App) {
                     &pk[..4.min(pk.len())],
                     &pk[pk.len().saturating_sub(4)..]
                 );
-                Line::from(vec![
+                let mut spans = vec![
                     Span::styled(prefix, style),
                     Span::styled(format!("{:<40}", kf.display), style),
-                    Span::styled(short, Style::new().fg(theme().success)),
-                ])
+                    Span::styled(format!("{short}  "), Style::new().fg(theme().success)),
+                ];
+                if let Some(name) = app.cfg.address_labels.get(pk) {
+                    spans.push(Span::styled(
+                        format!("❲{name}❳"),
+                        Style::new().fg(theme().accent),
+                    ));
+                }
+                Line::from(spans)
             })
             .collect()
     };
@@ -788,6 +827,7 @@ fn render_help_panel(f: &mut Frame) {
         row("a", "airdrop to current keypair"),
         row("+ / -", "change airdrop amount"),
         row("t", "transfer SOL (toggle local wallets)"),
+        row("n", "label the current wallet"),
         row("y", "copy focused field value"),
         row("o", "open address in Solana Explorer"),
         Line::from(""),
@@ -805,7 +845,7 @@ fn render_help_panel(f: &mut Frame) {
     f.render_widget(Paragraph::new(lines), inner);
 }
 
-fn render_transfer(f: &mut Frame, app: &App) {
+fn render_transfer(f: &mut Frame, app: &App, balance: &Balance) {
     let inner = modal(f, "transfer SOL", 110, 15);
 
     let from = config::pubkey_from_keypair(&app.cfg.keypair_path).unwrap_or_default();
@@ -821,7 +861,22 @@ fn render_transfer(f: &mut Frame, app: &App) {
         Span::styled("  from:    ", Style::new().fg(theme().dim)),
         Span::styled(from, Style::new().fg(theme().success)),
         Span::styled(format!("  ({cluster})"), Style::new().fg(theme().dim)),
+        balance_span(balance),
     ]));
+    let mut wallet_spans = vec![
+        Span::styled("  wallet:  ", Style::new().fg(theme().dim)),
+        Span::styled(
+            config::display_path(Path::new(&app.cfg.keypair_path)),
+            Style::new().fg(theme().muted),
+        ),
+    ];
+    if let Some(name) = app.current_label() {
+        wallet_spans.push(Span::styled(
+            format!("  ❲{name}❳"),
+            Style::new().fg(theme().accent).add_modifier(Modifier::BOLD),
+        ));
+    }
+    lines.push(Line::from(wallet_spans));
     lines.push(Line::from(""));
     lines.push(Line::from(""));
 
@@ -837,6 +892,8 @@ fn render_transfer(f: &mut Frame, app: &App) {
                 "  (type, or ←→ to pick a local wallet)",
                 Style::new().fg(theme().dim),
             ));
+            lines.push(Line::from(to_spans));
+            lines.push(Line::from(""));
         } else {
             to_spans.push(Span::styled(
                 if to_focus {
@@ -846,15 +903,35 @@ fn render_transfer(f: &mut Frame, app: &App) {
                 },
                 Style::new().fg(theme().text),
             ));
-            if let Some(name) = app.recipient_local_name() {
-                to_spans.push(Span::styled(
-                    format!("  ({name})"),
-                    Style::new().fg(theme().success),
-                ));
+            let local = app.recipient_local_name();
+            let label = app.cfg.address_labels.get(&app.tx_to).cloned();
+            // For a typed external address, keep the label inline; for a selected
+            // local wallet the path + label move to their own row below.
+            if local.is_none() {
+                if let Some(name) = &label {
+                    to_spans.push(Span::styled(
+                        format!("  ❲{name}❳"),
+                        Style::new().fg(theme().accent),
+                    ));
+                }
+            }
+            lines.push(Line::from(to_spans));
+            if let Some(path) = local {
+                let mut detail = vec![
+                    Span::raw(" ".repeat(13)),
+                    Span::styled(path, Style::new().fg(theme().muted)),
+                ];
+                if let Some(name) = &label {
+                    detail.push(Span::styled(
+                        format!("  ❲{name}❳"),
+                        Style::new().fg(theme().accent).add_modifier(Modifier::BOLD),
+                    ));
+                }
+                lines.push(Line::from(detail));
+            } else {
+                lines.push(Line::from(""));
             }
         }
-        lines.push(Line::from(to_spans));
-        lines.push(Line::from(""));
 
         let amt_focus = app.tx_focus == 1;
         lines.push(Line::from(vec![
@@ -876,6 +953,10 @@ fn render_transfer(f: &mut Frame, app: &App) {
             Span::styled(app.tx_to.clone(), Style::new().fg(theme().text)),
             match app.recipient_local_name() {
                 Some(name) => Span::styled(format!("  ({name})"), Style::new().fg(theme().success)),
+                None => Span::raw(""),
+            },
+            match app.cfg.address_labels.get(&app.tx_to) {
+                Some(name) => Span::styled(format!("  ❲{name}❳"), Style::new().fg(theme().accent)),
                 None => Span::raw(""),
             },
         ]));
@@ -1034,6 +1115,29 @@ fn render_themes(f: &mut Frame, app: &App) {
         .collect();
 
     render_list(f, inner, vec![], items, app.theme_sel, vec![]);
+}
+
+fn render_label(f: &mut Frame, app: &App) {
+    let inner = modal(f, "label wallet", 64, 8);
+    let pubkey = config::pubkey_from_keypair(&app.cfg.keypair_path).unwrap_or_default();
+    let lines = vec![
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("  wallet:  ", Style::new().fg(theme().dim)),
+            Span::styled(pubkey, Style::new().fg(theme().success)),
+        ]),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("  label:   ", Style::new().fg(theme().text)),
+            Span::styled(format!("{}▊", app.buf), Style::new().fg(theme().warning)),
+        ]),
+        Line::from(""),
+        Line::from(Span::styled(
+            "  ⏎ save   (empty clears)   esc cancel",
+            Style::new().fg(theme().dim),
+        )),
+    ];
+    f.render_widget(Paragraph::new(lines), inner);
 }
 
 /// Render a modal body as: fixed header, a scrollable item list (kept in view

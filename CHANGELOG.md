@@ -12,6 +12,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`getVoteAccounts`) and the median recent priority fee in micro-lamports per
   compute unit (`getRecentPrioritizationFees`). Both refresh on the existing
   slow-stats tick, so the fast telemetry path is unchanged.
+- Live slot heartbeat: a fast `getSlot` poll ticks the displayed slot between
+  full telemetry refreshes and pulses a blip (`●`) in the sidebar on each new
+  slot, decaying to a dim flatline when the chain/RPC stalls.
+- Wallet labels: press `n` to name the current wallet. Labels are stored in the
+  config's `address_labels` map (Solana-CLI compatible) and shown on the keypair
+  field, in the keypair picker (also searchable), and on transfer recipients.
 
 ## [0.1.1] - 2026-06-18
 

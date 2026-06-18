@@ -35,6 +35,7 @@ pub enum Mode {
     Transfer,
     TransferConfirm,
     Themes,
+    Label,
     Help,
 }
 
@@ -66,6 +67,8 @@ pub struct App {
     pub tx_amount: String,
     pub tx_focus: usize,
     pub tx_key_idx: usize,
+    /// Last known balance (lamports) of the active keypair, for transfer checks.
+    pub balance_lamports: Option<u64>,
     pub theme_name: String,
     pub theme_sel: usize,
     pub theme_prev: Theme,
@@ -105,6 +108,7 @@ impl App {
             tx_amount: String::new(),
             tx_focus: 0,
             tx_key_idx: 0,
+            balance_lamports: None,
             theme_name: theme::configured_name(),
             theme_sel: 0,
             theme_prev: theme::theme(),
@@ -141,6 +145,7 @@ impl App {
             Mode::Transfer => self.key_transfer(key),
             Mode::TransferConfirm => self.key_transfer_confirm(key),
             Mode::Themes => self.key_themes(key),
+            Mode::Label => self.key_label(key),
             Mode::Help => self.key_help(key),
         }
     }
@@ -200,6 +205,7 @@ impl App {
             KeyCode::Char('+') | KeyCode::Char('=') => self.cycle_airdrop(1),
             KeyCode::Char('-') | KeyCode::Char('_') => self.cycle_airdrop(-1),
             KeyCode::Char('y') => self.copy_field(),
+            KeyCode::Char('n') => self.open_label(),
             KeyCode::Char('o') => self.open_explorer(),
             KeyCode::Char('t') => self.open_transfer(),
             KeyCode::Char('e') => self.open_endpoints(),
@@ -401,7 +407,13 @@ impl App {
             .iter()
             .enumerate()
             .filter(|(_, kf)| {
-                let hay = format!("{} {}", kf.display, kf.pubkey).to_lowercase();
+                let label = self
+                    .cfg
+                    .address_labels
+                    .get(&kf.pubkey)
+                    .map(String::as_str)
+                    .unwrap_or("");
+                let hay = format!("{} {} {}", kf.display, kf.pubkey, label).to_lowercase();
                 is_subsequence(&needle, &hay)
             })
             .map(|(i, _)| i)
@@ -722,7 +734,10 @@ impl App {
                 }
             }
             KeyCode::Enter => {
-                if !self.tx_to.is_empty() && self.tx_amount.parse::<f64>().is_ok_and(|a| a > 0.0) {
+                let amount_positive = self.tx_amount.parse::<f64>().is_ok_and(|a| a > 0.0);
+                if !amount_within_balance(self.balance_lamports, &self.tx_amount) {
+                    self.status = "amount exceeds balance".to_string();
+                } else if !self.tx_to.is_empty() && amount_positive {
                     self.mode = Mode::TransferConfirm;
                 } else {
                     self.status = "enter a recipient and a positive amount".to_string();
@@ -739,7 +754,14 @@ impl App {
                 if self.tx_focus == 0 {
                     self.tx_to.push(c);
                 } else {
-                    self.tx_amount.push(c);
+                    // Reject a keystroke that would push the amount over balance.
+                    let mut candidate = self.tx_amount.clone();
+                    candidate.push(c);
+                    if amount_within_balance(self.balance_lamports, &candidate) {
+                        self.tx_amount = candidate;
+                    } else {
+                        self.status = "amount exceeds balance".to_string();
+                    }
                 }
             }
             _ => {}
@@ -810,6 +832,55 @@ impl App {
             _ => {}
         }
     }
+
+    // --- Wallet labels --------------------------------------------------
+
+    /// The label saved for the current keypair's pubkey, if any.
+    pub fn current_label(&self) -> Option<String> {
+        let pk = config::pubkey_from_keypair(&self.cfg.keypair_path)?;
+        self.cfg.address_labels.get(&pk).cloned()
+    }
+
+    /// Open the label editor for the current wallet, pre-filled with any label.
+    fn open_label(&mut self) {
+        match config::pubkey_from_keypair(&self.cfg.keypair_path) {
+            Some(pk) => {
+                self.buf = self
+                    .cfg
+                    .address_labels
+                    .get(&pk)
+                    .cloned()
+                    .unwrap_or_default();
+                self.mode = Mode::Label;
+            }
+            None => self.status = "no keypair to label".to_string(),
+        }
+    }
+
+    fn key_label(&mut self, key: KeyEvent) {
+        match key.code {
+            KeyCode::Esc => self.mode = Mode::Normal,
+            KeyCode::Enter => {
+                if let Some(pk) = config::pubkey_from_keypair(&self.cfg.keypair_path) {
+                    let label = self.buf.trim().to_string();
+                    if label.is_empty() {
+                        self.cfg.address_labels.remove(&pk);
+                        self.status = "label cleared".to_string();
+                    } else {
+                        self.cfg.address_labels.insert(pk, label.clone());
+                        self.status = format!("labeled '{label}'");
+                    }
+                    self.dirty = true;
+                }
+                self.mode = Mode::Normal;
+            }
+            KeyCode::Backspace => {
+                self.buf.pop();
+            }
+            KeyCode::Char(c) => self.buf.push(c),
+            _ => {}
+        }
+    }
 }
 
 /// Step an index by `delta` within `[0, len)`, wrapping around both ends.
@@ -820,6 +891,16 @@ pub fn wrap_index(cur: usize, delta: i32, len: usize) -> usize {
     }
     let n = len as i32;
     (((cur as i32 + delta) % n + n) % n) as usize
+}
+
+/// True if `amount` (a SOL string) does not exceed `balance` lamports.
+/// An unknown balance or an in-progress (unparseable) amount is permissive,
+/// so the user can keep typing or correcting before it resolves to a number.
+pub fn amount_within_balance(balance: Option<u64>, amount: &str) -> bool {
+    match (balance, amount.parse::<f64>()) {
+        (Some(bal), Ok(sol)) => sol * 1_000_000_000.0 <= bal as f64,
+        _ => true,
+    }
 }
 
 /// True if every char of `needle` appears in `hay` in order.

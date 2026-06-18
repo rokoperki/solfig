@@ -1,6 +1,6 @@
 //! Integration tests for the app-level pure helpers.
 
-use solfig::app::{is_subsequence, url_encode, wrap_index, AIRDROP_STEPS};
+use solfig::app::{amount_within_balance, is_subsequence, url_encode, wrap_index, AIRDROP_STEPS};
 
 #[test]
 fn is_subsequence_matches_in_order() {
@@ -27,6 +27,28 @@ fn url_encode_preserves_unreserved_and_escapes_the_rest() {
 fn airdrop_steps_are_sorted_and_positive() {
     assert!(AIRDROP_STEPS.windows(2).all(|w| w[0] < w[1]));
     assert!(AIRDROP_STEPS.iter().all(|&s| s > 0.0));
+}
+
+#[test]
+fn amount_within_balance_caps_at_known_balance() {
+    let two_sol = Some(2_000_000_000u64);
+    // Under and exactly at the balance are allowed; over is rejected.
+    assert!(amount_within_balance(two_sol, "1"));
+    assert!(amount_within_balance(two_sol, "1.5"));
+    assert!(amount_within_balance(two_sol, "2")); // boundary is inclusive
+    assert!(!amount_within_balance(two_sol, "2.5"));
+    assert!(!amount_within_balance(two_sol, "3"));
+
+    // Unknown balance is permissive (can't validate yet).
+    assert!(amount_within_balance(None, "999999"));
+
+    // In-progress / non-numeric input is permissive so typing isn't blocked.
+    assert!(amount_within_balance(two_sol, ""));
+    assert!(amount_within_balance(two_sol, "abc"));
+
+    // A zero balance rejects any positive amount.
+    assert!(amount_within_balance(Some(0), "0"));
+    assert!(!amount_within_balance(Some(0), "0.0001"));
 }
 
 #[test]

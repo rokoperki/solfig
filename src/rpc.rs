@@ -53,6 +53,7 @@ pub struct ClusterStats {
 /// A unit of work for the background worker.
 pub enum Request {
     Version(String),
+    Slot(String),
     Telemetry(String),
     Stats(String),
     Price,
@@ -78,6 +79,7 @@ pub enum Request {
 pub enum Response {
     // The leading String is the RPC URL the result is for (used for caching).
     Health(String, Health),
+    Slot(String, Option<u64>),
     Telemetry(String, Option<Telemetry>),
     Stats(String, Option<ClusterStats>),
     Price(Option<Price>),
@@ -124,6 +126,7 @@ impl Rpc {
         thread::spawn(move || {
             while let Ok(first) = gen_rx.recv() {
                 let mut latest_version: Option<String> = None;
+                let mut latest_slot: Option<String> = None;
                 let mut latest_telemetry: Option<String> = None;
                 let mut latest_stats: Option<String> = None;
                 let mut want_price = false;
@@ -133,6 +136,7 @@ impl Rpc {
                 while let Some(req) = cur.take() {
                     match req {
                         Request::Version(url) => latest_version = Some(url),
+                        Request::Slot(url) => latest_slot = Some(url),
                         Request::Telemetry(url) => latest_telemetry = Some(url),
                         Request::Stats(url) => latest_stats = Some(url),
                         Request::Price => want_price = true,
@@ -160,6 +164,10 @@ impl Rpc {
                     {
                         run_transfer(&res_tx, &url, &keypair, &pubkey, &to, &amount);
                     }
+                }
+                // Slot first: it drives the live heartbeat, so keep it snappy.
+                if let Some(url) = latest_slot {
+                    let _ = res_tx.send(Response::Slot(url.clone(), probe_slot(&url)));
                 }
                 if let Some(url) = latest_version {
                     let _ = res_tx.send(Response::Health(url.clone(), Health::Checking));
@@ -232,6 +240,12 @@ fn probe_version(url: &str) -> Health {
         }
         Err(e) => Health::Err(e),
     }
+}
+
+/// Cheap current-slot probe used to drive the live heartbeat between the
+/// slower full telemetry refreshes.
+fn probe_slot(url: &str) -> Option<u64> {
+    rpc_call(url, "getSlot", json!([])).ok()?["result"].as_u64()
 }
 
 fn probe_telemetry(url: &str) -> Option<Telemetry> {

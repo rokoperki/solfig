@@ -5,6 +5,8 @@ use solfig::{config, ui};
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
+/// How often to poll the bare current slot (drives the live heartbeat).
+const SLOT_INTERVAL: Duration = Duration::from_millis(800);
 /// How often to refresh live cluster telemetry (slot/epoch/tps).
 const TELEMETRY_INTERVAL: Duration = Duration::from_secs(2);
 /// How often to refresh slower stats (validators/supply).
@@ -56,6 +58,11 @@ fn run(
     let mut last_telemetry = Instant::now() - TELEMETRY_INTERVAL;
     let mut last_stats = Instant::now() - STATS_INTERVAL;
     let mut last_price = Instant::now() - PRICE_INTERVAL;
+    let mut last_slot_poll = Instant::now() - SLOT_INTERVAL;
+    // Live-heartbeat state: the highest slot seen on the active cluster and when
+    // it last advanced. `None` beat = no pulse yet (or chain/RPC stalled).
+    let mut last_slot: u64 = 0;
+    let mut last_beat: Option<Instant> = None;
     loop {
         while let Some(resp) = rpc.poll() {
             match resp {
@@ -70,6 +77,18 @@ fn run(
                         health_cache.insert(url.clone(), h.clone());
                         if current {
                             *health = h;
+                        }
+                    }
+                }
+                Response::Slot(url, s) => {
+                    if let (Some(s), true) = (s, url == app.cfg.json_rpc_url) {
+                        if s > last_slot {
+                            last_slot = s;
+                            last_beat = Some(Instant::now());
+                        }
+                        // Keep the displayed slot ticking between full refreshes.
+                        if let Some(t) = telemetry.as_mut() {
+                            t.slot = t.slot.max(s);
                         }
                     }
                 }
@@ -95,12 +114,21 @@ fn run(
                         *price = p;
                     }
                 }
-                Response::Balance(b) => *balance = b,
+                Response::Balance(b) => {
+                    app.balance_lamports = match &b {
+                        Balance::Lamports(l) => Some(*l),
+                        _ => None,
+                    };
+                    *balance = b;
+                }
                 Response::Notice(msg) => app.status = msg,
             }
         }
         if app.need_health_check {
             app.need_health_check = false;
+            // Reset the heartbeat: the new cluster's slot count is unrelated.
+            last_slot = 0;
+            last_beat = None;
             let url = app.cfg.json_rpc_url.clone();
             if url.is_empty() {
                 *health = Health::Unknown;
@@ -111,15 +139,19 @@ fn run(
                 *telemetry = tele_cache.get(&url).cloned();
                 *stats = stats_cache.get(&url).cloned();
                 *health = health_cache.get(&url).cloned().unwrap_or(Health::Checking);
+                rpc.request(Request::Slot(url.clone()));
                 rpc.request(Request::Version(url.clone()));
                 rpc.request(Request::Telemetry(url.clone()));
                 rpc.request(Request::Stats(url));
+                last_slot_poll = Instant::now();
                 last_telemetry = Instant::now();
                 last_stats = Instant::now();
             }
         }
         if app.need_balance_check {
             app.need_balance_check = false;
+            // Drop the cached amount until the fresh balance arrives.
+            app.balance_lamports = None;
             match config::pubkey_from_keypair(&app.cfg.keypair_path) {
                 Some(pubkey) if !app.cfg.json_rpc_url.is_empty() => {
                     *balance = Balance::Loading;
@@ -154,6 +186,11 @@ fn run(
             }
         }
 
+        // Fast current-slot poll — the heartbeat ticker between full refreshes.
+        if !app.cfg.json_rpc_url.is_empty() && last_slot_poll.elapsed() >= SLOT_INTERVAL {
+            rpc.request(Request::Slot(app.cfg.json_rpc_url.clone()));
+            last_slot_poll = Instant::now();
+        }
         // Periodic live telemetry refresh (the slot ticker).
         if !app.cfg.json_rpc_url.is_empty() && last_telemetry.elapsed() >= TELEMETRY_INTERVAL {
             rpc.request(Request::Telemetry(app.cfg.json_rpc_url.clone()));
@@ -170,7 +207,8 @@ fn run(
             last_price = Instant::now();
         }
 
-        term.draw(|f| ui::render(f, app, health, balance, telemetry, stats, price))?;
+        let beat_age = last_beat.map(|b| b.elapsed());
+        term.draw(|f| ui::render(f, app, health, balance, telemetry, stats, price, beat_age))?;
 
         if event::poll(Duration::from_millis(120))? {
             if let Event::Key(key) = event::read()? {
