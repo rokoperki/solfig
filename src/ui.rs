@@ -2,7 +2,7 @@ use crate::app::{App, Field, Mode, FIELDS};
 use crate::config::{self, COMMITMENTS, MONIKERS};
 use crate::rpc::{Balance, Health};
 use ratatui::prelude::*;
-use ratatui::widgets::{Block, Borders, Clear, Paragraph};
+use ratatui::widgets::{Block, Borders, Clear, Paragraph, Wrap};
 use std::path::Path;
 
 const ACCENT: Color = Color::Cyan;
@@ -12,7 +12,7 @@ pub fn render(f: &mut Frame, app: &App, health: &Health, balance: &Balance) {
     let chunks = Layout::vertical([
         Constraint::Min(3),
         Constraint::Length(1),
-        Constraint::Length(1),
+        Constraint::Length(2),
     ])
     .split(f.area());
 
@@ -31,6 +31,12 @@ pub fn render(f: &mut Frame, app: &App, health: &Health, balance: &Balance) {
     }
     if app.mode == Mode::Faucets || app.mode == Mode::NewFaucet {
         render_faucets(f, app);
+    }
+    if app.mode == Mode::Transfer || app.mode == Mode::TransferConfirm {
+        render_transfer(f, app);
+    }
+    if app.mode == Mode::Help {
+        render_help_panel(f);
     }
 }
 
@@ -236,7 +242,7 @@ fn render_help(f: &mut Frame, app: &App, area: Rect) {
     } else {
         match app.mode {
             Mode::Normal => format!(
-                " ↑↓ field  ←→ pick  ⏎ edit  a airdrop {}◎(±)  o explorer  y copy  e endpoints  f faucet  p profiles  s save  q quit",
+                " ↑↓ move   ←→ pick   ⏎ edit   a airdrop {}◎(±)   t transfer   s save   ? all keys   q quit",
                 app.airdrop_sol
             ),
             Mode::EditField => " type value   ⏎ confirm   esc cancel".to_string(),
@@ -254,10 +260,16 @@ fn render_help(f: &mut Frame, app: &App, area: Rect) {
                     .to_string()
             }
             Mode::NewFaucet => " type  name=url   ⏎ save   esc back".to_string(),
+            Mode::Transfer => {
+                " tab switch field   ←→ pick local wallet   ⏎ review   esc cancel".to_string()
+            }
+            Mode::TransferConfirm => " ⏎ send   esc cancel".to_string(),
+            Mode::Help => " esc / ? close".to_string(),
         }
     };
     f.render_widget(
-        Paragraph::new(Line::from(Span::styled(text, Style::new().fg(DIM)))),
+        Paragraph::new(Line::from(Span::styled(text, Style::new().fg(DIM))))
+            .wrap(Wrap { trim: true }),
         area,
     );
 }
@@ -351,6 +363,155 @@ fn render_endpoints(f: &mut Frame, app: &App) {
     }
 
     f.render_widget(Paragraph::new(lines), inner);
+}
+
+fn render_help_panel(f: &mut Frame) {
+    let area = centered(64, 26, f.area());
+    f.render_widget(Clear, area);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(" solcfg · keybindings ")
+        .border_style(Style::new().fg(ACCENT));
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+
+    let section = |title: &str| {
+        Line::from(Span::styled(
+            format!(" {title}"),
+            Style::new().fg(ACCENT).add_modifier(Modifier::BOLD),
+        ))
+    };
+    let row = |key: &str, desc: &str| {
+        Line::from(vec![
+            Span::styled(format!("   {key:<14}"), Style::new().fg(Color::Yellow)),
+            Span::styled(desc.to_string(), Style::new().fg(Color::White)),
+        ])
+    };
+
+    let lines: Vec<Line> = vec![
+        section("Navigate"),
+        row("↑ ↓ / j k", "move between fields"),
+        row("← → / h l", "change value (cluster, commitment)"),
+        row("⏎", "edit field / open keypair picker"),
+        Line::from(""),
+        section("Wallet"),
+        row("⏎", "on Keypair: pick from local wallets"),
+        row("g", "in picker: generate a new keypair"),
+        row("a", "airdrop to current keypair"),
+        row("+ / -", "change airdrop amount"),
+        row("t", "transfer SOL (toggle local wallets)"),
+        row("y", "copy focused field value"),
+        row("o", "open address in Solana Explorer"),
+        Line::from(""),
+        section("RPC & config"),
+        row("e", "custom RPC endpoints"),
+        row("f", "web faucets (open in browser)"),
+        row("p", "profiles (switch environments)"),
+        Line::from(""),
+        section("File"),
+        row("s / r", "save / reload config"),
+        row("q", "quit (asks if unsaved)"),
+    ];
+
+    f.render_widget(Paragraph::new(lines), inner);
+}
+
+fn render_transfer(f: &mut Frame, app: &App) {
+    let area = centered(110, 15, f.area());
+    f.render_widget(Clear, area);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(" transfer SOL ")
+        .border_style(Style::new().fg(ACCENT));
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+
+    let from = config::pubkey_from_keypair(&app.cfg.keypair_path).unwrap_or_default();
+    let cluster = config::moniker_for_url(&app.cfg.json_rpc_url).unwrap_or("custom");
+    let mut lines = vec![
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("  from:    ", Style::new().fg(DIM)),
+            Span::styled(from, Style::new().fg(Color::Green)),
+            Span::styled(format!("  ({cluster})"), Style::new().fg(DIM)),
+        ]),
+        Line::from(""),
+        Line::from(""),
+    ];
+
+    if app.mode == Mode::Transfer {
+        let to_focus = app.tx_focus == 0;
+        let mut to_spans = vec![
+            field_marker(to_focus),
+            Span::styled("to:      ", Style::new().fg(DIM)),
+        ];
+        if app.tx_to.is_empty() && to_focus {
+            to_spans.push(Span::styled("▊", Style::new().fg(Color::Yellow)));
+            to_spans.push(Span::styled(
+                "  (type, or ←→ to pick a local wallet)",
+                Style::new().fg(DIM),
+            ));
+        } else {
+            to_spans.push(Span::styled(
+                if to_focus {
+                    format!("{}▊", app.tx_to)
+                } else {
+                    app.tx_to.clone()
+                },
+                Style::new().fg(Color::White),
+            ));
+            if let Some(name) = app.recipient_local_name() {
+                to_spans.push(Span::styled(format!("  ({name})"), Style::new().fg(Color::Green)));
+            }
+        }
+        lines.push(Line::from(to_spans));
+        lines.push(Line::from(""));
+
+        let amt_focus = app.tx_focus == 1;
+        lines.push(Line::from(vec![
+            field_marker(amt_focus),
+            Span::styled("amount:  ", Style::new().fg(DIM)),
+            Span::styled(
+                if amt_focus {
+                    format!("{}▊", app.tx_amount)
+                } else {
+                    app.tx_amount.clone()
+                },
+                Style::new().fg(Color::White),
+            ),
+            Span::styled(" SOL", Style::new().fg(DIM)),
+        ]));
+    } else {
+        lines.push(Line::from(vec![
+            Span::styled("  to:      ", Style::new().fg(DIM)),
+            Span::styled(app.tx_to.clone(), Style::new().fg(Color::White)),
+            match app.recipient_local_name() {
+                Some(name) => Span::styled(format!("  ({name})"), Style::new().fg(Color::Green)),
+                None => Span::raw(""),
+            },
+        ]));
+        lines.push(Line::from(vec![
+            Span::styled("  amount:  ", Style::new().fg(DIM)),
+            Span::styled(
+                format!("{} SOL", app.tx_amount),
+                Style::new().fg(Color::White).add_modifier(Modifier::BOLD),
+            ),
+        ]));
+        lines.push(Line::from(""));
+        lines.push(Line::from(Span::styled(
+            "  ⏎ send   esc cancel",
+            Style::new().fg(Color::Yellow),
+        )));
+    }
+    f.render_widget(Paragraph::new(lines), inner);
+}
+
+fn field_marker(focused: bool) -> Span<'static> {
+    if focused {
+        Span::styled("  › ", Style::new().fg(ACCENT).add_modifier(Modifier::BOLD))
+    } else {
+        Span::raw("    ")
+    }
 }
 
 fn render_faucets(f: &mut Frame, app: &App) {

@@ -30,6 +30,13 @@ pub enum Request {
         pubkey: String,
         lamports: u64,
     },
+    Transfer {
+        url: String,
+        keypair: String,
+        pubkey: String,
+        to: String,
+        amount: String,
+    },
 }
 
 /// An update produced by the background worker.
@@ -56,6 +63,7 @@ impl Rpc {
                 let mut latest_version: Option<String> = None;
                 let mut latest_balance: Option<(String, String)> = None;
                 let mut airdrops: Vec<(String, String, u64)> = Vec::new();
+                let mut transfers: Vec<Request> = Vec::new();
                 let mut cur = Some(first);
                 while let Some(req) = cur.take() {
                     match req {
@@ -68,11 +76,24 @@ impl Rpc {
                             pubkey,
                             lamports,
                         } => airdrops.push((url, pubkey, lamports)),
+                        t @ Request::Transfer { .. } => transfers.push(t),
                     }
                     cur = req_rx.try_recv().ok();
                 }
                 for (url, pubkey, lamports) in airdrops {
                     run_airdrop(&res_tx, &url, &pubkey, lamports);
+                }
+                for t in transfers {
+                    if let Request::Transfer {
+                        url,
+                        keypair,
+                        pubkey,
+                        to,
+                        amount,
+                    } = t
+                    {
+                        run_transfer(&res_tx, &url, &keypair, &pubkey, &to, &amount);
+                    }
                 }
                 if let Some(url) = latest_version {
                     let _ = res_tx.send(Response::Health(Health::Checking));
@@ -130,7 +151,8 @@ fn probe_version(url: &str) -> Health {
 }
 
 fn probe_balance(url: &str, pubkey: &str) -> Balance {
-    match rpc_call(url, "getBalance", json!([pubkey])) {
+    // Use `confirmed` so balances reflect just-confirmed txs (default is finalized).
+    match rpc_call(url, "getBalance", json!([pubkey, {"commitment": "confirmed"}])) {
         Ok(v) => {
             if let Some(lamports) = v["result"]["value"].as_u64() {
                 Balance::Lamports(lamports)
@@ -173,6 +195,58 @@ fn run_airdrop(res_tx: &Sender<Response>, url: &str, pubkey: &str, lamports: u64
         }
         Err(e) => {
             let _ = res_tx.send(Response::Notice(airdrop_error(&e)));
+        }
+    }
+}
+
+/// Send SOL by shelling out to the `solana transfer` CLI (it signs the tx).
+fn run_transfer(
+    res_tx: &Sender<Response>,
+    url: &str,
+    keypair: &str,
+    pubkey: &str,
+    to: &str,
+    amount: &str,
+) {
+    let to_short: String = to.chars().take(8).collect();
+    let _ = res_tx.send(Response::Notice(format!(
+        "sending {amount} SOL → {to_short}…"
+    )));
+    let output = std::process::Command::new("solana")
+        .args([
+            "transfer",
+            to,
+            amount,
+            "--keypair",
+            keypair,
+            "--url",
+            url,
+            "--allow-unfunded-recipient",
+            "--commitment",
+            "confirmed",
+        ])
+        .output();
+    match output {
+        Ok(o) if o.status.success() => {
+            let stdout = String::from_utf8_lossy(&o.stdout);
+            let sig = stdout
+                .lines()
+                .find_map(|l| l.trim().strip_prefix("Signature: "))
+                .unwrap_or("")
+                .trim();
+            let sig_short: String = sig.chars().take(8).collect();
+            let _ = res_tx.send(Response::Balance(probe_balance(url, pubkey)));
+            let _ = res_tx.send(Response::Notice(format!("transfer confirmed ({sig_short}…)")));
+        }
+        Ok(o) => {
+            let err = String::from_utf8_lossy(&o.stderr);
+            let msg = err.lines().next().unwrap_or("transfer failed");
+            let _ = res_tx.send(Response::Notice(format!("transfer failed: {msg}")));
+        }
+        Err(e) => {
+            let _ = res_tx.send(Response::Notice(format!(
+                "transfer failed (solana CLI?): {e}"
+            )));
         }
     }
 }

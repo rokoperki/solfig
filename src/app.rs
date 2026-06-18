@@ -31,6 +31,9 @@ pub enum Mode {
     NewEndpoint,
     Faucets,
     NewFaucet,
+    Transfer,
+    TransferConfirm,
+    Help,
 }
 
 pub struct App {
@@ -56,6 +59,11 @@ pub struct App {
     pub airdrop_sol: f64,
     pub faucets: Vec<Faucet>,
     pub faucet_sel: usize,
+    pub need_transfer: bool,
+    pub tx_to: String,
+    pub tx_amount: String,
+    pub tx_focus: usize,
+    pub tx_key_idx: usize,
 }
 
 /// Selectable airdrop amounts (SOL).
@@ -87,6 +95,11 @@ impl App {
             airdrop_sol: 1.0,
             faucets: Vec::new(),
             faucet_sel: 0,
+            need_transfer: false,
+            tx_to: String::new(),
+            tx_amount: String::new(),
+            tx_focus: 0,
+            tx_key_idx: 0,
         }
     }
 
@@ -117,6 +130,18 @@ impl App {
             Mode::NewEndpoint => self.key_new_endpoint(key),
             Mode::Faucets => self.key_faucets(key),
             Mode::NewFaucet => self.key_new_faucet(key),
+            Mode::Transfer => self.key_transfer(key),
+            Mode::TransferConfirm => self.key_transfer_confirm(key),
+            Mode::Help => self.key_help(key),
+        }
+    }
+
+    fn key_help(&mut self, key: KeyEvent) {
+        if matches!(
+            key.code,
+            KeyCode::Esc | KeyCode::Char('?') | KeyCode::Char('q')
+        ) {
+            self.mode = Mode::Normal;
         }
     }
 
@@ -167,11 +192,13 @@ impl App {
             KeyCode::Char('-') | KeyCode::Char('_') => self.cycle_airdrop(-1),
             KeyCode::Char('y') => self.copy_field(),
             KeyCode::Char('o') => self.open_explorer(),
+            KeyCode::Char('t') => self.open_transfer(),
             KeyCode::Char('e') => self.open_endpoints(),
             KeyCode::Char('f') => self.open_faucets(),
             KeyCode::Char('s') => self.save(),
             KeyCode::Char('r') => self.reload(),
             KeyCode::Char('p') => self.open_profiles(),
+            KeyCode::Char('?') => self.mode = Mode::Help,
             _ => {}
         }
     }
@@ -667,6 +694,86 @@ impl App {
                 self.buf.pop();
             }
             KeyCode::Char(c) => self.buf.push(c),
+            _ => {}
+        }
+    }
+    // --- Transfer SOL ---------------------------------------------------
+
+    fn open_transfer(&mut self) {
+        if config::pubkey_from_keypair(&self.cfg.keypair_path).is_none() {
+            self.status = "no valid keypair to send from".to_string();
+            return;
+        }
+        self.key_files = config::scan_keypairs(&self.cfg.keypair_path);
+        self.tx_to.clear();
+        self.tx_amount.clear();
+        self.tx_focus = 0;
+        self.tx_key_idx = 0;
+        self.mode = Mode::Transfer;
+    }
+
+    /// Display name of the local wallet matching the current recipient, if any.
+    pub fn recipient_local_name(&self) -> Option<String> {
+        self.key_files
+            .iter()
+            .find(|k| k.pubkey == self.tx_to)
+            .map(|k| k.display.clone())
+    }
+
+    fn key_transfer(&mut self, key: KeyEvent) {
+        match key.code {
+            KeyCode::Esc => self.mode = Mode::Normal,
+            KeyCode::Tab | KeyCode::Up | KeyCode::Down => self.tx_focus = 1 - self.tx_focus,
+            // On the recipient field, ←→ toggles through local keypairs.
+            KeyCode::Left | KeyCode::Right if self.tx_focus == 0 => {
+                if !self.key_files.is_empty() {
+                    let delta = if key.code == KeyCode::Left {
+                        self.key_files.len() - 1
+                    } else {
+                        1
+                    };
+                    self.tx_key_idx = (self.tx_key_idx + delta) % self.key_files.len();
+                    self.tx_to = self.key_files[self.tx_key_idx].pubkey.clone();
+                }
+            }
+            KeyCode::Enter => {
+                if !self.tx_to.is_empty()
+                    && self.tx_amount.parse::<f64>().is_ok_and(|a| a > 0.0)
+                {
+                    self.mode = Mode::TransferConfirm;
+                } else {
+                    self.status = "enter a recipient and a positive amount".to_string();
+                }
+            }
+            KeyCode::Backspace => {
+                if self.tx_focus == 0 {
+                    self.tx_to.pop();
+                } else {
+                    self.tx_amount.pop();
+                }
+            }
+            KeyCode::Char(c) => {
+                if self.tx_focus == 0 {
+                    self.tx_to.push(c);
+                } else {
+                    self.tx_amount.push(c);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn key_transfer_confirm(&mut self, key: KeyEvent) {
+        match key.code {
+            KeyCode::Enter => {
+                self.need_transfer = true;
+                self.status = "transfer queued…".to_string();
+                self.mode = Mode::Normal;
+            }
+            KeyCode::Esc => {
+                self.status = "transfer cancelled".to_string();
+                self.mode = Mode::Normal;
+            }
             _ => {}
         }
     }

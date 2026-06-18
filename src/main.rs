@@ -71,6 +71,18 @@ fn run(
                 });
             }
         }
+        if app.need_transfer {
+            app.need_transfer = false;
+            if let Some(pubkey) = config::pubkey_from_keypair(&app.cfg.keypair_path) {
+                rpc.request(Request::Transfer {
+                    url: app.cfg.json_rpc_url.clone(),
+                    keypair: app.cfg.keypair_path.clone(),
+                    pubkey,
+                    to: app.tx_to.clone(),
+                    amount: app.tx_amount.clone(),
+                });
+            }
+        }
 
         term.draw(|f| ui::render(f, app, health, balance))?;
 
