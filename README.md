@@ -157,6 +157,15 @@ cargo clippy --all-targets
 cargo fmt
 ```
 
+Before pushing, run the same checks CI runs, on the stable toolchain (CI uses
+the latest stable, and clippy lints vary between versions):
+
+```sh
+cargo +stable fmt --all --check
+cargo +stable clippy --all-targets -- -D warnings
+cargo +stable test --all
+```
+
 Project layout:
 
 ```
