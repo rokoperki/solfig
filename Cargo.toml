@@ -3,6 +3,13 @@ name = "solfig"
 version = "0.1.0"
 edition = "2021"
 description = "SOLFIG — a TUI for the Solana CLI config"
+authors = ["rokoperki"]
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/rokoperki/solfig"
+homepage = "https://github.com/rokoperki/solfig"
+readme = "README.md"
+keywords = ["solana", "tui", "cli", "config", "wallet"]
+categories = ["command-line-utilities"]
 
 [dependencies]
 ratatui = "0.29"
