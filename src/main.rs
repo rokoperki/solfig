@@ -86,7 +86,7 @@ fn run(
 
         term.draw(|f| ui::render(f, app, health, balance))?;
 
-        if event::poll(Duration::from_millis(200))? {
+        if event::poll(Duration::from_millis(120))? {
             if let Event::Key(key) = event::read()? {
                 if key.kind == KeyEventKind::Press {
                     app.handle_key(key);
