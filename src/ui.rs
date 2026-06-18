@@ -29,6 +29,9 @@ pub fn render(f: &mut Frame, app: &App, health: &Health, balance: &Balance) {
     if app.mode == Mode::Endpoints || app.mode == Mode::NewEndpoint {
         render_endpoints(f, app);
     }
+    if app.mode == Mode::Faucets || app.mode == Mode::NewFaucet {
+        render_faucets(f, app);
+    }
 }
 
 fn render_body(f: &mut Frame, app: &App, balance: &Balance, area: Rect) {
@@ -181,18 +184,22 @@ fn commitment_line(app: &App, focused: bool) -> Line<'static> {
 }
 
 fn websocket_lines(app: &App, focused: bool, editing: bool) -> Vec<Line<'static>> {
-    let value = if editing {
-        Span::styled(format!("{}▊", app.buf), Style::new().fg(Color::Yellow))
+    let mut spans = vec![marker(focused), label("WebSocket", focused)];
+    if editing {
+        spans.push(Span::styled(
+            format!("{}▊", app.buf),
+            Style::new().fg(Color::Yellow),
+        ));
     } else if app.cfg.websocket_url.is_empty() {
-        Span::styled("(auto from RPC)", Style::new().fg(DIM))
+        spans.push(Span::styled("(auto) ", Style::new().fg(DIM)));
+        spans.push(Span::styled(
+            config::derive_ws_url(&app.cfg.json_rpc_url),
+            Style::new().fg(Color::Gray),
+        ));
     } else {
-        Span::raw(app.cfg.websocket_url.clone())
-    };
-    vec![Line::from(vec![
-        marker(focused),
-        label("WebSocket", focused),
-        value,
-    ])]
+        spans.push(Span::raw(app.cfg.websocket_url.clone()));
+    }
+    vec![Line::from(spans)]
 }
 
 fn render_status(f: &mut Frame, app: &App, health: &Health, area: Rect) {
@@ -229,7 +236,7 @@ fn render_help(f: &mut Frame, app: &App, area: Rect) {
     } else {
         match app.mode {
             Mode::Normal => format!(
-                " ↑↓ field  ←→ pick  ⏎ edit  a airdrop {}◎ (±)  y copy  e endpoints  p profiles  s save  q quit",
+                " ↑↓ field  ←→ pick  ⏎ edit  a airdrop {}◎(±)  y copy  e endpoints  f faucet  p profiles  s save  q quit",
                 app.airdrop_sol
             ),
             Mode::EditField => " type value   ⏎ confirm   esc cancel".to_string(),
@@ -240,6 +247,11 @@ fn render_help(f: &mut Frame, app: &App, area: Rect) {
             }
             Mode::Endpoints => " ↑↓ select   ⏎ use   n new   d delete   esc back".to_string(),
             Mode::NewEndpoint => " type  name=url   ⏎ save   esc back".to_string(),
+            Mode::Faucets => {
+                " ↑↓ select   ⏎ open in browser (copies pubkey)   n new   d delete   esc back"
+                    .to_string()
+            }
+            Mode::NewFaucet => " type  name=url   ⏎ save   esc back".to_string(),
         }
     };
     f.render_widget(
@@ -329,6 +341,50 @@ fn render_endpoints(f: &mut Frame, app: &App) {
     }
 
     if app.mode == Mode::NewEndpoint {
+        lines.push(Line::from(""));
+        lines.push(Line::from(vec![
+            Span::styled("  name=url: ", Style::new().fg(Color::White)),
+            Span::styled(format!("{}▊", app.buf), Style::new().fg(Color::Yellow)),
+        ]));
+    }
+
+    f.render_widget(Paragraph::new(lines), inner);
+}
+
+fn render_faucets(f: &mut Frame, app: &App) {
+    let area = centered(72, 14, f.area());
+    f.render_widget(Clear, area);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(" web faucets ")
+        .border_style(Style::new().fg(ACCENT));
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+
+    let mut lines: Vec<Line> = Vec::new();
+    if app.faucets.is_empty() {
+        lines.push(Line::from(Span::styled(
+            "  no faucets — press 'n' to add one (name=url)",
+            Style::new().fg(DIM),
+        )));
+    } else {
+        for (i, fct) in app.faucets.iter().enumerate() {
+            let sel = i == app.faucet_sel;
+            let prefix = if sel { " > " } else { "   " };
+            let style = if sel {
+                Style::new().fg(ACCENT).add_modifier(Modifier::BOLD)
+            } else {
+                Style::new().fg(Color::White)
+            };
+            lines.push(Line::from(vec![
+                Span::styled(prefix, style),
+                Span::styled(format!("{:<12}", fct.name), style),
+                Span::styled(fct.url.clone(), Style::new().fg(DIM)),
+            ]));
+        }
+    }
+
+    if app.mode == Mode::NewFaucet {
         lines.push(Line::from(""));
         lines.push(Line::from(vec![
             Span::styled("  name=url: ", Style::new().fg(Color::White)),

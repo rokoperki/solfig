@@ -1,6 +1,7 @@
 mod app;
 mod config;
 mod endpoints;
+mod faucets;
 mod profiles;
 mod rpc;
 mod ui;

@@ -181,8 +181,7 @@ fn airdrop_error(raw: &str) -> String {
         || lower.contains("429")
         || lower.contains("too many")
     {
-        "airdrop rate-limited — lower the amount, wait, switch faucet (e), or use faucet.solana.com"
-            .to_string()
+        "airdrop rate-limited — lower amount (-), wait a bit, or open a web faucet (f)".to_string()
     } else {
         format!("airdrop failed: {raw}")
     }

@@ -1,5 +1,6 @@
 use crate::config::{self, KeyFile, SolanaConfig, COMMITMENTS, MONIKERS};
 use crate::endpoints::{self, Endpoint};
+use crate::faucets::{self, Faucet};
 use crate::profiles::{self, Profile};
 use crossterm::event::{KeyCode, KeyEvent};
 use std::path::PathBuf;
@@ -28,6 +29,8 @@ pub enum Mode {
     NewProfile,
     Endpoints,
     NewEndpoint,
+    Faucets,
+    NewFaucet,
 }
 
 pub struct App {
@@ -51,6 +54,8 @@ pub struct App {
     pub endpoints: Vec<Endpoint>,
     pub ep_sel: usize,
     pub airdrop_sol: f64,
+    pub faucets: Vec<Faucet>,
+    pub faucet_sel: usize,
 }
 
 /// Selectable airdrop amounts (SOL).
@@ -80,6 +85,8 @@ impl App {
             endpoints: endpoints::load(),
             ep_sel: 0,
             airdrop_sol: 1.0,
+            faucets: Vec::new(),
+            faucet_sel: 0,
         }
     }
 
@@ -108,6 +115,8 @@ impl App {
             Mode::NewProfile => self.key_new_profile(key),
             Mode::Endpoints => self.key_endpoints(key),
             Mode::NewEndpoint => self.key_new_endpoint(key),
+            Mode::Faucets => self.key_faucets(key),
+            Mode::NewFaucet => self.key_new_faucet(key),
         }
     }
 
@@ -158,6 +167,7 @@ impl App {
             KeyCode::Char('-') | KeyCode::Char('_') => self.cycle_airdrop(-1),
             KeyCode::Char('y') => self.copy_field(),
             KeyCode::Char('e') => self.open_endpoints(),
+            KeyCode::Char('f') => self.open_faucets(),
             KeyCode::Char('s') => self.save(),
             KeyCode::Char('r') => self.reload(),
             KeyCode::Char('p') => self.open_profiles(),
@@ -528,10 +538,113 @@ impl App {
             _ => {}
         }
     }
+
+    fn open_faucets(&mut self) {
+        self.faucets = faucets::load();
+        self.faucet_sel = 0;
+        self.mode = Mode::Faucets;
+    }
+
+    fn key_faucets(&mut self, key: KeyEvent) {
+        match key.code {
+            KeyCode::Esc | KeyCode::Char('f') | KeyCode::Char('q') => {
+                self.mode = Mode::Normal;
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                if !self.faucets.is_empty() {
+                    self.faucet_sel = (self.faucet_sel + 1) % self.faucets.len();
+                }
+            }
+            KeyCode::Up | KeyCode::Char('k') => {
+                if !self.faucets.is_empty() {
+                    self.faucet_sel =
+                        (self.faucet_sel + self.faucets.len() - 1) % self.faucets.len();
+                }
+            }
+            KeyCode::Enter => self.launch_faucet(),
+            KeyCode::Char('n') => {
+                self.buf.clear();
+                self.mode = Mode::NewFaucet;
+            }
+            KeyCode::Char('d') => {
+                if self.faucet_sel < self.faucets.len() {
+                    let removed = self.faucets.remove(self.faucet_sel);
+                    let _ = faucets::save(&self.faucets);
+                    self.faucet_sel = self.faucet_sel.min(self.faucets.len().saturating_sub(1));
+                    self.status = format!("removed '{}'", removed.name);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// Copy the pubkey to the clipboard and open the faucet in the browser.
+    fn launch_faucet(&mut self) {
+        let Some(faucet) = self.faucets.get(self.faucet_sel) else {
+            return;
+        };
+        let name = faucet.name.clone();
+        let url = faucet.url.clone();
+        let copied = config::pubkey_from_keypair(&self.cfg.keypair_path)
+            .and_then(|pk| arboard::Clipboard::new().and_then(|mut c| c.set_text(pk)).ok())
+            .is_some();
+        self.status = match open_url(&url) {
+            Ok(()) if copied => format!("opened {name} — pubkey copied to clipboard"),
+            Ok(()) => format!("opened {name}"),
+            Err(e) => format!("open failed: {e}"),
+        };
+        self.mode = Mode::Normal;
+    }
+
+    fn key_new_faucet(&mut self, key: KeyEvent) {
+        match key.code {
+            KeyCode::Esc => self.mode = Mode::Faucets,
+            KeyCode::Enter => {
+                match self.buf.split_once('=') {
+                    Some((name, url)) if !name.trim().is_empty() && !url.trim().is_empty() => {
+                        self.faucets.push(Faucet {
+                            name: name.trim().to_string(),
+                            url: url.trim().to_string(),
+                        });
+                        match faucets::save(&self.faucets) {
+                            Ok(()) => self.status = format!("added '{}'", name.trim()),
+                            Err(e) => self.status = format!("save failed: {e}"),
+                        }
+                    }
+                    _ => self.status = "format: name=url".to_string(),
+                }
+                self.mode = Mode::Faucets;
+            }
+            KeyCode::Backspace => {
+                self.buf.pop();
+            }
+            KeyCode::Char(c) => self.buf.push(c),
+            _ => {}
+        }
+    }
 }
 
 /// True if every char of `needle` appears in `hay` in order.
 fn is_subsequence(needle: &str, hay: &str) -> bool {
     let mut chars = hay.chars();
     needle.chars().all(|c| chars.any(|h| h == c))
+}
+
+/// Open a URL in the system default browser.
+fn open_url(url: &str) -> std::io::Result<()> {
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open").arg(url).spawn()?;
+    }
+    #[cfg(target_os = "linux")]
+    {
+        std::process::Command::new("xdg-open").arg(url).spawn()?;
+    }
+    #[cfg(target_os = "windows")]
+    {
+        std::process::Command::new("cmd")
+            .args(["/C", "start", url])
+            .spawn()?;
+    }
+    Ok(())
 }

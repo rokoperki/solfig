@@ -93,6 +93,33 @@ pub fn moniker_for_url(url: &str) -> Option<&'static str> {
     MONIKERS.iter().find(|(_, u)| *u == url).map(|(m, _)| *m)
 }
 
+/// Derive the WebSocket URL the CLI computes from an RPC URL:
+/// `http`→`ws`, `https`→`wss`, and port (if present) incremented by one.
+pub fn derive_ws_url(rpc: &str) -> String {
+    let (rest, ws_scheme) = if let Some(r) = rpc.strip_prefix("https://") {
+        (r, "wss://")
+    } else if let Some(r) = rpc.strip_prefix("http://") {
+        (r, "ws://")
+    } else {
+        return String::new();
+    };
+    let (authority, path) = match rest.find('/') {
+        Some(i) => (&rest[..i], &rest[i..]),
+        None => (rest, ""),
+    };
+    let authority = match authority.rfind(':') {
+        Some(colon) => {
+            let (host, port) = authority.split_at(colon);
+            match port[1..].parse::<u16>() {
+                Ok(p) => format!("{host}:{}", p + 1),
+                Err(_) => authority.to_string(),
+            }
+        }
+        None => authority.to_string(),
+    };
+    format!("{ws_scheme}{authority}{path}")
+}
+
 /// Expand a leading `~/` to the home directory.
 pub fn expand_tilde(path: &str) -> PathBuf {
     if let Some(rest) = path.strip_prefix("~/") {
