@@ -285,11 +285,7 @@ fn probe_tps(url: &str) -> u64 {
             let s = &v["result"][0];
             let n = s["numTransactions"].as_u64().unwrap_or(0);
             let p = s["samplePeriodSecs"].as_u64().unwrap_or(0);
-            if p > 0 {
-                n / p
-            } else {
-                0
-            }
+            n.checked_div(p).unwrap_or(0)
         }
         Err(_) => 0,
     }

@@ -565,13 +565,11 @@ impl App {
                 self.buf.clear();
                 self.mode = Mode::NewEndpoint;
             }
-            KeyCode::Char('d') => {
-                if self.ep_sel < self.endpoints.len() {
-                    let removed = self.endpoints.remove(self.ep_sel);
-                    let _ = endpoints::save(&self.endpoints);
-                    self.ep_sel = self.ep_sel.min(self.endpoints.len().saturating_sub(1));
-                    self.status = format!("removed '{}'", removed.name);
-                }
+            KeyCode::Char('d') if self.ep_sel < self.endpoints.len() => {
+                let removed = self.endpoints.remove(self.ep_sel);
+                let _ = endpoints::save(&self.endpoints);
+                self.ep_sel = self.ep_sel.min(self.endpoints.len().saturating_sub(1));
+                self.status = format!("removed '{}'", removed.name);
             }
             _ => {}
         }
@@ -626,13 +624,11 @@ impl App {
                 self.buf.clear();
                 self.mode = Mode::NewFaucet;
             }
-            KeyCode::Char('d') => {
-                if self.faucet_sel < self.faucets.len() {
-                    let removed = self.faucets.remove(self.faucet_sel);
-                    let _ = faucets::save(&self.faucets);
-                    self.faucet_sel = self.faucet_sel.min(self.faucets.len().saturating_sub(1));
-                    self.status = format!("removed '{}'", removed.name);
-                }
+            KeyCode::Char('d') if self.faucet_sel < self.faucets.len() => {
+                let removed = self.faucets.remove(self.faucet_sel);
+                let _ = faucets::save(&self.faucets);
+                self.faucet_sel = self.faucet_sel.min(self.faucets.len().saturating_sub(1));
+                self.status = format!("removed '{}'", removed.name);
             }
             _ => {}
         }
