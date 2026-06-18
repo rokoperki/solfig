@@ -164,6 +164,7 @@ the latest stable, and clippy lints vary between versions):
 cargo +stable fmt --all --check
 cargo +stable clippy --all-targets -- -D warnings
 cargo +stable test --all
+cargo audit            # requires: cargo install cargo-audit
 ```
 
 Project layout:
