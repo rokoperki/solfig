@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-06-18
+
 ### Added
 - Telemetry sidebar now shows delinquent (non-voting) validator count
   (`getVoteAccounts`) and the median recent priority fee in micro-lamports per
@@ -18,6 +20,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Wallet labels: press `n` to name the current wallet. Labels are stored in the
   config's `address_labels` map (Solana-CLI compatible) and shown on the keypair
   field, in the keypair picker (also searchable), and on transfer recipients.
+- Transfer screen shows the sender balance and validates the amount against it,
+  both while typing and on review, so a transfer that would exceed the balance
+  can't be submitted.
 
 ## [0.1.1] - 2026-06-18
 
@@ -60,6 +65,7 @@ Initial release.
 - Theming: 7 built-in palettes plus user-defined themes, with live preview.
 - Safety: mainnet hazard banner, copy-field and open-in-Explorer helpers.
 
-[Unreleased]: https://github.com/rokoperki/solfig/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/rokoperki/solfig/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/rokoperki/solfig/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/rokoperki/solfig/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/rokoperki/solfig/releases/tag/v0.1.0
