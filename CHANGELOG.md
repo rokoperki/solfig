@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Telemetry sidebar now shows delinquent (non-voting) validator count
+  (`getVoteAccounts`) and the median recent priority fee in micro-lamports per
+  compute unit (`getRecentPrioritizationFees`). Both refresh on the existing
+  slow-stats tick, so the fast telemetry path is unchanged.
+
 ## [0.1.1] - 2026-06-18
 
 Maintenance release — no user-facing behavior changes.

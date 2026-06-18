@@ -263,6 +263,16 @@ fn render_sidebar(
                 "nodes",
                 Span::styled(group_thousands(s.validators), Style::new().fg(theme().text)),
             ));
+            // Delinquent (non-voting) validators: green when none, error otherwise.
+            let delinq_color = if s.delinquent == 0 {
+                theme().success
+            } else {
+                theme().error
+            };
+            lines.push(kv(
+                "delinq",
+                Span::styled(group_thousands(s.delinquent), Style::new().fg(delinq_color)),
+            ));
             lines.push(kv(
                 "txns",
                 Span::styled(abbrev(s.txn_count), Style::new().fg(theme().text)),
@@ -276,9 +286,16 @@ fn render_sidebar(
                 "supply",
                 Span::styled(supply, Style::new().fg(theme().text)),
             ));
+            lines.push(kv(
+                "p.fee",
+                Span::styled(
+                    format!("{} µ/cu", group_thousands(s.priority_fee)),
+                    Style::new().fg(theme().text),
+                ),
+            ));
         }
         None => {
-            for k in ["nodes", "txns", "supply"] {
+            for k in ["nodes", "delinq", "txns", "supply", "p.fee"] {
                 lines.push(kv(k, Span::styled("—", Style::new().fg(theme().dim))));
             }
         }

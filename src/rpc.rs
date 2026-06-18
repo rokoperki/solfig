@@ -43,8 +43,11 @@ pub struct Price {
 #[derive(Clone, Default)]
 pub struct ClusterStats {
     pub validators: u64,
+    pub delinquent: u64,
     pub txn_count: u64,
     pub supply_sol: u64,
+    /// Median recent priority fee (micro-lamports per compute unit).
+    pub priority_fee: u64,
 }
 
 /// A unit of work for the background worker.
@@ -250,6 +253,11 @@ fn probe_stats(url: &str) -> Option<ClusterStats> {
         .ok()
         .and_then(|v| v["result"].as_array().map(|a| a.len() as u64))
         .unwrap_or(0);
+    // Voting validators currently behind / not voting — a cluster-health signal.
+    let delinquent = rpc_call(url, "getVoteAccounts", json!([]))
+        .ok()
+        .and_then(|v| v["result"]["delinquent"].as_array().map(|a| a.len() as u64))
+        .unwrap_or(0);
     let txn_count = rpc_call(url, "getTransactionCount", json!([]))
         .ok()
         .and_then(|v| v["result"].as_u64())
@@ -259,11 +267,31 @@ fn probe_stats(url: &str) -> Option<ClusterStats> {
         .and_then(|v| v["result"]["value"]["circulating"].as_u64())
         .map(|l| l / 1_000_000_000)
         .unwrap_or(0);
+    let priority_fee = rpc_call(url, "getRecentPrioritizationFees", json!([]))
+        .ok()
+        .and_then(|v| median_priority_fee(&v))
+        .unwrap_or(0);
     Some(ClusterStats {
         validators,
+        delinquent,
         txn_count,
         supply_sol,
+        priority_fee,
     })
+}
+
+/// Median of the recent per-slot priority fees (micro-lamports per CU).
+fn median_priority_fee(v: &Value) -> Option<u64> {
+    let mut fees: Vec<u64> = v["result"]
+        .as_array()?
+        .iter()
+        .filter_map(|e| e["prioritizationFee"].as_u64())
+        .collect();
+    if fees.is_empty() {
+        return None;
+    }
+    fees.sort_unstable();
+    Some(fees[fees.len() / 2])
 }
 
 /// SOL/USD spot price and 24h change from CoinGecko (best-effort; external API).

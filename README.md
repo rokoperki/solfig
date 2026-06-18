@@ -18,8 +18,9 @@ telemetry and your wallet balance — without hand-editing YAML or memorizing
 - **One-key cluster switching** — built-in monikers (mainnet-beta, devnet,
   testnet, localhost) plus your own saved endpoints.
 - **Live telemetry sidebar** — slot, block height, epoch progress + ETA, TPS,
-  validator count, transaction count, circulating supply, SOL/USD price, and
-  RPC ping/version. Values are cached per-cluster so switching is instant.
+  validator count, delinquent (non-voting) validators, median priority fee,
+  transaction count, circulating supply, SOL/USD price, and RPC ping/version.
+  Values are cached per-cluster so switching is instant.
 - **Wallet** — derives and displays your pubkey and balance, requests airdrops
   (non-mainnet), and sends SOL transfers.
 - **Keypair picker** — fuzzy-filter keypairs discovered under
