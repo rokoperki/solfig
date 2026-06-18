@@ -2,6 +2,7 @@ use crate::config::{self, KeyFile, SolanaConfig, COMMITMENTS, MONIKERS};
 use crate::endpoints::{self, Endpoint};
 use crate::faucets::{self, Faucet};
 use crate::profiles::{self, Profile};
+use crate::theme::{self, Theme};
 use crossterm::event::{KeyCode, KeyEvent};
 use std::path::PathBuf;
 
@@ -33,6 +34,7 @@ pub enum Mode {
     NewFaucet,
     Transfer,
     TransferConfirm,
+    Themes,
     Help,
 }
 
@@ -64,6 +66,9 @@ pub struct App {
     pub tx_amount: String,
     pub tx_focus: usize,
     pub tx_key_idx: usize,
+    pub theme_name: String,
+    pub theme_sel: usize,
+    pub theme_prev: Theme,
 }
 
 /// Selectable airdrop amounts (SOL).
@@ -100,6 +105,9 @@ impl App {
             tx_amount: String::new(),
             tx_focus: 0,
             tx_key_idx: 0,
+            theme_name: theme::configured_name(),
+            theme_sel: 0,
+            theme_prev: theme::theme(),
         }
     }
 
@@ -132,6 +140,7 @@ impl App {
             Mode::NewFaucet => self.key_new_faucet(key),
             Mode::Transfer => self.key_transfer(key),
             Mode::TransferConfirm => self.key_transfer_confirm(key),
+            Mode::Themes => self.key_themes(key),
             Mode::Help => self.key_help(key),
         }
     }
@@ -198,6 +207,7 @@ impl App {
             KeyCode::Char('s') => self.save(),
             KeyCode::Char('r') => self.reload(),
             KeyCode::Char('p') => self.open_profiles(),
+            KeyCode::Char('T') => self.open_themes(),
             KeyCode::Char('?') => self.mode = Mode::Help,
             _ => {}
         }
@@ -772,6 +782,56 @@ impl App {
             }
             KeyCode::Esc => {
                 self.status = "transfer cancelled".to_string();
+                self.mode = Mode::Normal;
+            }
+            _ => {}
+        }
+    }
+
+    // --- Themes ---------------------------------------------------------
+
+    fn open_themes(&mut self) {
+        // Remember the active theme so Esc can cleanly revert the preview.
+        self.theme_prev = theme::theme();
+        self.theme_sel = theme::names()
+            .iter()
+            .position(|n| *n == self.theme_name)
+            .unwrap_or(0);
+        self.preview_theme();
+        self.mode = Mode::Themes;
+    }
+
+    /// Apply the highlighted theme to the live UI (preview, not yet persisted).
+    fn preview_theme(&self) {
+        if let Some(name) = theme::names().get(self.theme_sel) {
+            theme::set(theme::resolve(name));
+        }
+    }
+
+    fn key_themes(&mut self, key: KeyEvent) {
+        let count = theme::names().len();
+        match key.code {
+            KeyCode::Esc | KeyCode::Char('q') => {
+                theme::set(self.theme_prev.clone());
+                self.status = "theme unchanged".to_string();
+                self.mode = Mode::Normal;
+            }
+            KeyCode::Down | KeyCode::Char('j') if count > 0 => {
+                self.theme_sel = (self.theme_sel + 1) % count;
+                self.preview_theme();
+            }
+            KeyCode::Up | KeyCode::Char('k') if count > 0 => {
+                self.theme_sel = (self.theme_sel + count - 1) % count;
+                self.preview_theme();
+            }
+            KeyCode::Enter => {
+                if let Some(name) = theme::names().get(self.theme_sel).cloned() {
+                    self.theme_name = name.clone();
+                    self.status = match theme::persist_name(&name) {
+                        Ok(()) => format!("theme: {name}"),
+                        Err(e) => format!("theme set (save failed: {e})"),
+                    };
+                }
                 self.mode = Mode::Normal;
             }
             _ => {}

@@ -1,15 +1,12 @@
 use crate::app::{App, Field, Mode, FIELDS};
 use crate::config::{self, COMMITMENTS, MONIKERS};
-use crate::rpc::{Balance, ClusterStats, Health, Telemetry};
+use crate::rpc::{Balance, ClusterStats, Health, Price, Telemetry};
+use crate::theme::{self, theme};
 use ratatui::prelude::*;
 use ratatui::widgets::{
     Block, Borders, Clear, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, Wrap,
 };
 use std::path::Path;
-
-const ACCENT: Color = Color::Cyan;
-const DIM: Color = Color::DarkGray;
-const HIGHLIGHT: Color = Color::Rgb(38, 40, 56);
 
 /// ANSI Shadow "SOLFIG" wordmark.
 fn wordmark() -> [&'static str; 6] {
@@ -25,12 +22,13 @@ fn wordmark() -> [&'static str; 6] {
 
 /// Network-specific accent: a glance tells you which cluster you're on.
 fn cluster_color(url: &str) -> Color {
+    let t = theme();
     match config::moniker_for_url(url) {
-        Some("mainnet-beta") => Color::Red,
-        Some("devnet") => Color::Magenta,
-        Some("testnet") => Color::Yellow,
-        Some("localhost") => Color::Blue,
-        _ => ACCENT,
+        Some("mainnet-beta") => t.mainnet,
+        Some("devnet") => t.devnet,
+        Some("testnet") => t.testnet,
+        Some("localhost") => t.localhost,
+        _ => t.custom,
     }
 }
 
@@ -50,9 +48,9 @@ fn modal(f: &mut Frame, title: &str, width: u16, height: u16) -> Rect {
     f.render_widget(Clear, area);
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_style(Style::new().fg(ACCENT))
+        .border_style(Style::new().fg(theme().accent))
         .title(format!(" {title} "))
-        .title_style(Style::new().fg(ACCENT).add_modifier(Modifier::BOLD));
+        .title_style(Style::new().fg(theme().accent).add_modifier(Modifier::BOLD));
     let inner = block.inner(area);
     f.render_widget(block, area);
     inner
@@ -65,7 +63,7 @@ pub fn render(
     balance: &Balance,
     telemetry: &Option<Telemetry>,
     stats: &Option<ClusterStats>,
-    price: &Option<f64>,
+    price: &Option<Price>,
 ) {
     let chunks = Layout::vertical([
         Constraint::Min(3),
@@ -101,6 +99,9 @@ pub fn render(
     if app.mode == Mode::Transfer || app.mode == Mode::TransferConfirm {
         render_transfer(f, app);
     }
+    if app.mode == Mode::Themes {
+        render_themes(f, app);
+    }
     if app.mode == Mode::Help {
         render_help_panel(f);
     }
@@ -110,16 +111,16 @@ fn render_body(f: &mut Frame, app: &App, balance: &Balance, area: Rect) {
     let net = config::moniker_for_url(&app.cfg.json_rpc_url).unwrap_or("custom");
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_style(Style::new().fg(DIM))
+        .border_style(Style::new().fg(theme().dim))
         .title(Span::styled(
             format!(" {} ", app.path.display()),
-            Style::new().fg(DIM),
+            Style::new().fg(theme().dim),
         ))
         .title(
             Line::from(Span::styled(
                 format!(" {net} "),
                 Style::new()
-                    .fg(Color::Black)
+                    .fg(theme().on_accent)
                     .bg(cluster_color(&app.cfg.json_rpc_url))
                     .add_modifier(Modifier::BOLD),
             ))
@@ -137,7 +138,7 @@ fn render_body(f: &mut Frame, app: &App, balance: &Balance, area: Rect) {
         for row in wordmark() {
             lines.push(Line::from(Span::styled(
                 format!("  {row}"),
-                Style::new().fg(ACCENT).add_modifier(Modifier::BOLD),
+                Style::new().fg(theme().accent).add_modifier(Modifier::BOLD),
             )));
         }
     }
@@ -157,7 +158,7 @@ fn render_body(f: &mut Frame, app: &App, balance: &Balance, area: Rect) {
                 if used < inner_w {
                     line.spans.push(Span::raw(" ".repeat(inner_w - used)));
                 }
-                line.style = Style::new().bg(HIGHLIGHT);
+                line.style = Style::new().bg(theme().highlight);
             }
         }
         lines.extend(flines);
@@ -172,15 +173,15 @@ fn render_sidebar(
     health: &Health,
     telemetry: &Option<Telemetry>,
     stats: &Option<ClusterStats>,
-    price: &Option<f64>,
+    price: &Option<Price>,
     area: Rect,
 ) {
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_style(Style::new().fg(DIM))
+        .border_style(Style::new().fg(theme().dim))
         .title(Span::styled(
             " cluster ",
-            Style::new().fg(ACCENT).add_modifier(Modifier::BOLD),
+            Style::new().fg(theme().accent).add_modifier(Modifier::BOLD),
         ));
     let inner = block.inner(area);
     f.render_widget(block, area);
@@ -188,7 +189,7 @@ fn render_sidebar(
 
     let kv = |label: &str, value: Span<'static>| {
         Line::from(vec![
-            Span::styled(format!(" {label:<8}"), Style::new().fg(DIM)),
+            Span::styled(format!(" {label:<8}"), Style::new().fg(theme().dim)),
             value,
         ])
     };
@@ -219,18 +220,18 @@ fn render_sidebar(
         Some(t) => {
             lines.push(kv(
                 "slot",
-                Span::styled(group_thousands(t.slot), Style::new().fg(Color::White)),
+                Span::styled(group_thousands(t.slot), Style::new().fg(theme().text)),
             ));
             lines.push(kv(
                 "block",
                 Span::styled(
                     group_thousands(t.block_height),
-                    Style::new().fg(Color::White),
+                    Style::new().fg(theme().text),
                 ),
             ));
             lines.push(kv(
                 "epoch",
-                Span::styled(t.epoch.to_string(), Style::new().fg(Color::White)),
+                Span::styled(t.epoch.to_string(), Style::new().fg(theme().text)),
             ));
             let ratio = if t.slots_in_epoch > 0 {
                 t.slot_index as f64 / t.slots_in_epoch as f64
@@ -239,18 +240,18 @@ fn render_sidebar(
             };
             lines.push(Line::from(Span::styled(
                 format!(" {}", progress_bar(ratio, w.saturating_sub(2))),
-                Style::new().fg(ACCENT),
+                Style::new().fg(theme().accent),
             )));
             let eta = format_eta(t.slots_in_epoch.saturating_sub(t.slot_index));
-            lines.push(kv("eta", Span::styled(eta, Style::new().fg(Color::White))));
+            lines.push(kv("eta", Span::styled(eta, Style::new().fg(theme().text))));
             lines.push(kv(
                 "tps",
-                Span::styled(group_thousands(t.tps), Style::new().fg(Color::White)),
+                Span::styled(group_thousands(t.tps), Style::new().fg(theme().text)),
             ));
         }
         None => {
             for k in ["slot", "block", "epoch", "eta", "tps"] {
-                lines.push(kv(k, Span::styled("—", Style::new().fg(DIM))));
+                lines.push(kv(k, Span::styled("—", Style::new().fg(theme().dim))));
             }
         }
     }
@@ -260,11 +261,11 @@ fn render_sidebar(
         Some(s) => {
             lines.push(kv(
                 "nodes",
-                Span::styled(group_thousands(s.validators), Style::new().fg(Color::White)),
+                Span::styled(group_thousands(s.validators), Style::new().fg(theme().text)),
             ));
             lines.push(kv(
                 "txns",
-                Span::styled(abbrev(s.txn_count), Style::new().fg(Color::White)),
+                Span::styled(abbrev(s.txn_count), Style::new().fg(theme().text)),
             ));
             let supply = if s.supply_sol > 0 {
                 format!("{} SOL", abbrev(s.supply_sol))
@@ -273,31 +274,46 @@ fn render_sidebar(
             };
             lines.push(kv(
                 "supply",
-                Span::styled(supply, Style::new().fg(Color::White)),
+                Span::styled(supply, Style::new().fg(theme().text)),
             ));
         }
         None => {
             for k in ["nodes", "txns", "supply"] {
-                lines.push(kv(k, Span::styled("—", Style::new().fg(DIM))));
+                lines.push(kv(k, Span::styled("—", Style::new().fg(theme().dim))));
             }
         }
     }
 
     // SOL price is global (not per-cluster), so it persists across switches.
-    let price_span = match price {
-        Some(p) => Span::styled(format!("${p:.2}"), Style::new().fg(Color::Green)),
-        None => Span::styled("—", Style::new().fg(DIM)),
-    };
-    lines.push(kv("SOL", price_span));
+    match price {
+        Some(p) => {
+            let (arrow, color) = if p.change_24h > 0.0 {
+                ("▲", theme().success)
+            } else if p.change_24h < 0.0 {
+                ("▼", theme().error)
+            } else {
+                ("·", theme().muted)
+            };
+            lines.push(Line::from(vec![
+                Span::styled(" SOL     ", Style::new().fg(theme().dim)),
+                Span::styled(format!("${:.2} ", p.usd), Style::new().fg(theme().text)),
+                Span::styled(
+                    format!("{arrow}{:.1}%", p.change_24h.abs()),
+                    Style::new().fg(color),
+                ),
+            ]));
+        }
+        None => lines.push(kv("SOL", Span::styled("—", Style::new().fg(theme().dim)))),
+    }
 
     lines.push(Line::from(""));
     lines.push(kv(
         "ping",
-        Span::styled(ping, Style::new().fg(Color::White)),
+        Span::styled(ping, Style::new().fg(theme().text)),
     ));
     lines.push(kv(
         "version",
-        Span::styled(version, Style::new().fg(Color::White)),
+        Span::styled(version, Style::new().fg(theme().text)),
     ));
 
     f.render_widget(Paragraph::new(lines), inner);
@@ -363,15 +379,15 @@ fn hazard_banner(width: usize) -> Line<'static> {
     let content = format!("{}{text}{}", " ".repeat(left + 1), " ".repeat(right + 1));
     Line::from(Span::raw(content)).style(
         Style::new()
-            .bg(Color::Red)
-            .fg(Color::White)
+            .bg(theme().error)
+            .fg(theme().text)
             .add_modifier(Modifier::BOLD),
     )
 }
 
 fn marker(focused: bool) -> Span<'static> {
     if focused {
-        Span::styled(" ◆ ", Style::new().fg(ACCENT).add_modifier(Modifier::BOLD))
+        Span::styled(" ◆ ", Style::new().fg(theme().accent).add_modifier(Modifier::BOLD))
     } else {
         Span::raw("   ")
     }
@@ -379,9 +395,9 @@ fn marker(focused: bool) -> Span<'static> {
 
 fn label(text: &str, focused: bool) -> Span<'static> {
     let style = if focused {
-        Style::new().fg(ACCENT).add_modifier(Modifier::BOLD)
+        Style::new().fg(theme().accent).add_modifier(Modifier::BOLD)
     } else {
-        Style::new().fg(Color::White)
+        Style::new().fg(theme().text)
     };
     Span::styled(format!("{text:<11}"), style)
 }
@@ -405,15 +421,15 @@ fn balance_span(balance: &Balance) -> Span<'static> {
     match balance {
         Balance::Unknown => Span::raw(""),
         Balance::Loading => {
-            Span::styled(format!("  ◎ {}", spinner()), Style::new().fg(Color::Yellow))
+            Span::styled(format!("  ◎ {}", spinner()), Style::new().fg(theme().warning))
         }
         Balance::Lamports(l) => Span::styled(
             format!("  ◎ {:.4} SOL", *l as f64 / 1_000_000_000.0),
-            Style::new().fg(Color::Green),
+            Style::new().fg(theme().success),
         ),
         Balance::Err(e) => {
             let short: String = e.chars().take(28).collect();
-            Span::styled(format!("  ◎ n/a ({short})"), Style::new().fg(DIM))
+            Span::styled(format!("  ◎ n/a ({short})"), Style::new().fg(theme().dim))
         }
     }
 }
@@ -425,7 +441,7 @@ fn radio(name: &str, active_url: &str, on: bool) -> Span<'static> {
             .fg(cluster_color(active_url))
             .add_modifier(Modifier::BOLD)
     } else {
-        Style::new().fg(DIM)
+        Style::new().fg(theme().dim)
     };
     Span::styled(format!("{bullet}{name}   "), style)
 }
@@ -465,13 +481,13 @@ fn cluster_lines(app: &App, focused: bool, editing: bool) -> Vec<Line<'static>> 
 
     let detail = if editing {
         Line::from(vec![
-            Span::styled(format!("{}└ ", " ".repeat(12)), Style::new().fg(DIM)),
-            Span::styled(format!("{}▊", app.buf), Style::new().fg(Color::Yellow)),
+            Span::styled(format!("{}└ ", " ".repeat(12)), Style::new().fg(theme().dim)),
+            Span::styled(format!("{}▊", app.buf), Style::new().fg(theme().warning)),
         ])
     } else {
         Line::from(vec![
-            Span::styled(format!("{}└ ", " ".repeat(12)), Style::new().fg(DIM)),
-            Span::styled(app.cfg.json_rpc_url.clone(), Style::new().fg(DIM)),
+            Span::styled(format!("{}└ ", " ".repeat(12)), Style::new().fg(theme().dim)),
+            Span::styled(app.cfg.json_rpc_url.clone(), Style::new().fg(theme().dim)),
         ])
     };
     lines.push(detail);
@@ -493,16 +509,16 @@ fn keypair_lines(app: &App, focused: bool, balance: &Balance) -> Vec<Line<'stati
                 &pk[pk.len().saturating_sub(4)..]
             );
             Line::from(vec![
-                Span::styled("              └ ", Style::new().fg(DIM)),
-                Span::styled(short, Style::new().fg(Color::Green)),
+                Span::styled("              └ ", Style::new().fg(theme().dim)),
+                Span::styled(short, Style::new().fg(theme().success)),
                 balance_span(balance),
             ])
         }
         None => Line::from(vec![
-            Span::styled("              └ ", Style::new().fg(DIM)),
+            Span::styled("              └ ", Style::new().fg(theme().dim)),
             Span::styled(
                 "no readable keypair at this path",
-                Style::new().fg(Color::Red),
+                Style::new().fg(theme().error),
             ),
         ]),
     };
@@ -515,10 +531,10 @@ fn commitment_line(app: &App, focused: bool) -> Line<'static> {
         if *c == app.cfg.commitment {
             spans.push(Span::styled(
                 format!("[{c}] "),
-                Style::new().fg(ACCENT).add_modifier(Modifier::BOLD),
+                Style::new().fg(theme().accent).add_modifier(Modifier::BOLD),
             ));
         } else {
-            spans.push(Span::styled(format!(" {c}  "), Style::new().fg(DIM)));
+            spans.push(Span::styled(format!(" {c}  "), Style::new().fg(theme().dim)));
         }
     }
     Line::from(spans)
@@ -529,13 +545,13 @@ fn websocket_lines(app: &App, focused: bool, editing: bool) -> Vec<Line<'static>
     if editing {
         spans.push(Span::styled(
             format!("{}▊", app.buf),
-            Style::new().fg(Color::Yellow),
+            Style::new().fg(theme().warning),
         ));
     } else if app.cfg.websocket_url.is_empty() {
-        spans.push(Span::styled("(auto) ", Style::new().fg(DIM)));
+        spans.push(Span::styled("(auto) ", Style::new().fg(theme().dim)));
         spans.push(Span::styled(
             config::derive_ws_url(&app.cfg.json_rpc_url),
-            Style::new().fg(Color::Gray),
+            Style::new().fg(theme().muted),
         ));
     } else {
         spans.push(Span::raw(app.cfg.websocket_url.clone()));
@@ -545,29 +561,29 @@ fn websocket_lines(app: &App, focused: bool, editing: bool) -> Vec<Line<'static>
 
 fn render_status(f: &mut Frame, app: &App, health: &Health, area: Rect) {
     let (dot, text, color) = match health {
-        Health::Unknown => ("○".to_string(), "no endpoint".to_string(), DIM),
+        Health::Unknown => ("○".to_string(), "no endpoint".to_string(), theme().dim),
         Health::Checking => (
             spinner().to_string(),
             "checking…".to_string(),
-            Color::Yellow,
+            theme().warning,
         ),
         Health::Ok { version, ms } => (
             "●".to_string(),
             format!("reachable · v{version} · {ms}ms"),
-            Color::Green,
+            theme().success,
         ),
-        Health::Err(e) => ("●".to_string(), format!("unreachable — {e}"), Color::Red),
+        Health::Err(e) => ("●".to_string(), format!("unreachable — {e}"), theme().error),
     };
     let saved = if app.dirty {
-        Span::styled("✎ unsaved", Style::new().fg(Color::Yellow))
+        Span::styled("unsaved", Style::new().fg(theme().warning))
     } else {
-        Span::styled("✓ saved", Style::new().fg(Color::Green))
+        Span::styled("saved", Style::new().fg(theme().success))
     };
     let left = Line::from(vec![
         Span::styled(format!(" {dot} "), Style::new().fg(color)),
         Span::styled(text, Style::new().fg(color)),
         Span::raw("   "),
-        Span::styled(format!("[{}]", app.status), Style::new().fg(DIM)),
+        Span::styled(format!("[{}]", app.status), Style::new().fg(theme().dim)),
     ]);
     f.render_widget(Paragraph::new(left), area);
     // right-aligned saved indicator
@@ -605,11 +621,12 @@ fn render_help(f: &mut Frame, app: &App, area: Rect) {
                 " tab switch field   ←→ pick local wallet   ⏎ review   esc cancel".to_string()
             }
             Mode::TransferConfirm => " ⏎ send   esc cancel".to_string(),
+            Mode::Themes => " ↑↓ preview   ⏎ apply & save   esc cancel".to_string(),
             Mode::Help => " esc / ? close".to_string(),
         }
     };
     f.render_widget(
-        Paragraph::new(Line::from(Span::styled(text, Style::new().fg(DIM))))
+        Paragraph::new(Line::from(Span::styled(text, Style::new().fg(theme().dim))))
             .wrap(Wrap { trim: true }),
         area,
     );
@@ -621,22 +638,22 @@ fn render_key_picker(f: &mut Frame, app: &App) {
     let matches = app.filtered_keys();
     let header = vec![
         Line::from(vec![
-            Span::styled(" search: ", Style::new().fg(ACCENT)),
+            Span::styled(" search: ", Style::new().fg(theme().accent)),
             Span::styled(
                 format!("{}▊", app.key_filter),
-                Style::new().fg(Color::Yellow),
+                Style::new().fg(theme().warning),
             ),
         ]),
         Line::from(Span::styled(
             "─".repeat(inner.width as usize),
-            Style::new().fg(DIM),
+            Style::new().fg(theme().dim),
         )),
     ];
 
     let items: Vec<Line> = if matches.is_empty() {
         vec![Line::from(Span::styled(
             "  no matching keypairs found",
-            Style::new().fg(DIM),
+            Style::new().fg(theme().dim),
         ))]
     } else {
         matches
@@ -647,9 +664,9 @@ fn render_key_picker(f: &mut Frame, app: &App) {
                 let sel = row == app.key_sel;
                 let prefix = if sel { " > " } else { "   " };
                 let style = if sel {
-                    Style::new().fg(ACCENT).add_modifier(Modifier::BOLD)
+                    Style::new().fg(theme().accent).add_modifier(Modifier::BOLD)
                 } else {
-                    Style::new().fg(Color::White)
+                    Style::new().fg(theme().text)
                 };
                 let pk = &kf.pubkey;
                 let short = format!(
@@ -660,7 +677,7 @@ fn render_key_picker(f: &mut Frame, app: &App) {
                 Line::from(vec![
                     Span::styled(prefix, style),
                     Span::styled(format!("{:<40}", kf.display), style),
-                    Span::styled(short, Style::new().fg(Color::Green)),
+                    Span::styled(short, Style::new().fg(theme().success)),
                 ])
             })
             .collect()
@@ -675,7 +692,7 @@ fn render_endpoints(f: &mut Frame, app: &App) {
     let items: Vec<Line> = if app.endpoints.is_empty() {
         vec![Line::from(Span::styled(
             "  no custom endpoints — press 'n' to add one (name=url)",
-            Style::new().fg(DIM),
+            Style::new().fg(theme().dim),
         ))]
     } else {
         app.endpoints
@@ -685,14 +702,14 @@ fn render_endpoints(f: &mut Frame, app: &App) {
                 let sel = i == app.ep_sel;
                 let prefix = if sel { " > " } else { "   " };
                 let style = if sel {
-                    Style::new().fg(ACCENT).add_modifier(Modifier::BOLD)
+                    Style::new().fg(theme().accent).add_modifier(Modifier::BOLD)
                 } else {
-                    Style::new().fg(Color::White)
+                    Style::new().fg(theme().text)
                 };
                 Line::from(vec![
                     Span::styled(prefix, style),
                     Span::styled(format!("{:<16}", ep.name), style),
-                    Span::styled(ep.url.clone(), Style::new().fg(DIM)),
+                    Span::styled(ep.url.clone(), Style::new().fg(theme().dim)),
                 ])
             })
             .collect()
@@ -702,8 +719,8 @@ fn render_endpoints(f: &mut Frame, app: &App) {
         vec![
             Line::from(""),
             Line::from(vec![
-                Span::styled("  name=url: ", Style::new().fg(Color::White)),
-                Span::styled(format!("{}▊", app.buf), Style::new().fg(Color::Yellow)),
+                Span::styled("  name=url: ", Style::new().fg(theme().text)),
+                Span::styled(format!("{}▊", app.buf), Style::new().fg(theme().warning)),
             ]),
         ]
     } else {
@@ -719,13 +736,13 @@ fn render_help_panel(f: &mut Frame) {
     let section = |title: &str| {
         Line::from(Span::styled(
             format!(" {title}"),
-            Style::new().fg(ACCENT).add_modifier(Modifier::BOLD),
+            Style::new().fg(theme().accent).add_modifier(Modifier::BOLD),
         ))
     };
     let row = |key: &str, desc: &str| {
         Line::from(vec![
-            Span::styled(format!("   {key:<14}"), Style::new().fg(Color::Yellow)),
-            Span::styled(desc.to_string(), Style::new().fg(Color::White)),
+            Span::styled(format!("   {key:<14}"), Style::new().fg(theme().warning)),
+            Span::styled(desc.to_string(), Style::new().fg(theme().text)),
         ])
     };
 
@@ -748,6 +765,7 @@ fn render_help_panel(f: &mut Frame) {
         row("e", "custom RPC endpoints"),
         row("f", "web faucets (open in browser)"),
         row("p", "profiles (switch environments)"),
+        row("T", "themes (live preview)"),
         Line::from(""),
         section("File"),
         row("s / r", "save / reload config"),
@@ -766,13 +784,13 @@ fn render_transfer(f: &mut Frame, app: &App) {
     if cluster == "mainnet-beta" {
         lines.push(Line::from(Span::styled(
             "  ⚠  MAINNET — this sends REAL SOL",
-            Style::new().fg(Color::Red).add_modifier(Modifier::BOLD),
+            Style::new().fg(theme().error).add_modifier(Modifier::BOLD),
         )));
     }
     lines.push(Line::from(vec![
-        Span::styled("  from:    ", Style::new().fg(DIM)),
-        Span::styled(from, Style::new().fg(Color::Green)),
-        Span::styled(format!("  ({cluster})"), Style::new().fg(DIM)),
+        Span::styled("  from:    ", Style::new().fg(theme().dim)),
+        Span::styled(from, Style::new().fg(theme().success)),
+        Span::styled(format!("  ({cluster})"), Style::new().fg(theme().dim)),
     ]));
     lines.push(Line::from(""));
     lines.push(Line::from(""));
@@ -781,13 +799,13 @@ fn render_transfer(f: &mut Frame, app: &App) {
         let to_focus = app.tx_focus == 0;
         let mut to_spans = vec![
             field_marker(to_focus),
-            Span::styled("to:      ", Style::new().fg(DIM)),
+            Span::styled("to:      ", Style::new().fg(theme().dim)),
         ];
         if app.tx_to.is_empty() && to_focus {
-            to_spans.push(Span::styled("▊", Style::new().fg(Color::Yellow)));
+            to_spans.push(Span::styled("▊", Style::new().fg(theme().warning)));
             to_spans.push(Span::styled(
                 "  (type, or ←→ to pick a local wallet)",
-                Style::new().fg(DIM),
+                Style::new().fg(theme().dim),
             ));
         } else {
             to_spans.push(Span::styled(
@@ -796,12 +814,12 @@ fn render_transfer(f: &mut Frame, app: &App) {
                 } else {
                     app.tx_to.clone()
                 },
-                Style::new().fg(Color::White),
+                Style::new().fg(theme().text),
             ));
             if let Some(name) = app.recipient_local_name() {
                 to_spans.push(Span::styled(
                     format!("  ({name})"),
-                    Style::new().fg(Color::Green),
+                    Style::new().fg(theme().success),
                 ));
             }
         }
@@ -811,37 +829,37 @@ fn render_transfer(f: &mut Frame, app: &App) {
         let amt_focus = app.tx_focus == 1;
         lines.push(Line::from(vec![
             field_marker(amt_focus),
-            Span::styled("amount:  ", Style::new().fg(DIM)),
+            Span::styled("amount:  ", Style::new().fg(theme().dim)),
             Span::styled(
                 if amt_focus {
                     format!("{}▊", app.tx_amount)
                 } else {
                     app.tx_amount.clone()
                 },
-                Style::new().fg(Color::White),
+                Style::new().fg(theme().text),
             ),
-            Span::styled(" SOL", Style::new().fg(DIM)),
+            Span::styled(" SOL", Style::new().fg(theme().dim)),
         ]));
     } else {
         lines.push(Line::from(vec![
-            Span::styled("  to:      ", Style::new().fg(DIM)),
-            Span::styled(app.tx_to.clone(), Style::new().fg(Color::White)),
+            Span::styled("  to:      ", Style::new().fg(theme().dim)),
+            Span::styled(app.tx_to.clone(), Style::new().fg(theme().text)),
             match app.recipient_local_name() {
-                Some(name) => Span::styled(format!("  ({name})"), Style::new().fg(Color::Green)),
+                Some(name) => Span::styled(format!("  ({name})"), Style::new().fg(theme().success)),
                 None => Span::raw(""),
             },
         ]));
         lines.push(Line::from(vec![
-            Span::styled("  amount:  ", Style::new().fg(DIM)),
+            Span::styled("  amount:  ", Style::new().fg(theme().dim)),
             Span::styled(
                 format!("{} SOL", app.tx_amount),
-                Style::new().fg(Color::White).add_modifier(Modifier::BOLD),
+                Style::new().fg(theme().text).add_modifier(Modifier::BOLD),
             ),
         ]));
         lines.push(Line::from(""));
         lines.push(Line::from(Span::styled(
             "  ⏎ send   esc cancel",
-            Style::new().fg(Color::Yellow),
+            Style::new().fg(theme().warning),
         )));
     }
     f.render_widget(Paragraph::new(lines), inner);
@@ -849,7 +867,7 @@ fn render_transfer(f: &mut Frame, app: &App) {
 
 fn field_marker(focused: bool) -> Span<'static> {
     if focused {
-        Span::styled("  › ", Style::new().fg(ACCENT).add_modifier(Modifier::BOLD))
+        Span::styled("  › ", Style::new().fg(theme().accent).add_modifier(Modifier::BOLD))
     } else {
         Span::raw("    ")
     }
@@ -861,7 +879,7 @@ fn render_faucets(f: &mut Frame, app: &App) {
     let items: Vec<Line> = if app.faucets.is_empty() {
         vec![Line::from(Span::styled(
             "  no faucets — press 'n' to add one (name=url)",
-            Style::new().fg(DIM),
+            Style::new().fg(theme().dim),
         ))]
     } else {
         app.faucets
@@ -871,14 +889,14 @@ fn render_faucets(f: &mut Frame, app: &App) {
                 let sel = i == app.faucet_sel;
                 let prefix = if sel { " > " } else { "   " };
                 let style = if sel {
-                    Style::new().fg(ACCENT).add_modifier(Modifier::BOLD)
+                    Style::new().fg(theme().accent).add_modifier(Modifier::BOLD)
                 } else {
-                    Style::new().fg(Color::White)
+                    Style::new().fg(theme().text)
                 };
                 Line::from(vec![
                     Span::styled(prefix, style),
                     Span::styled(format!("{:<12}", fct.name), style),
-                    Span::styled(fct.url.clone(), Style::new().fg(DIM)),
+                    Span::styled(fct.url.clone(), Style::new().fg(theme().dim)),
                 ])
             })
             .collect()
@@ -888,8 +906,8 @@ fn render_faucets(f: &mut Frame, app: &App) {
         vec![
             Line::from(""),
             Line::from(vec![
-                Span::styled("  name=url: ", Style::new().fg(Color::White)),
-                Span::styled(format!("{}▊", app.buf), Style::new().fg(Color::Yellow)),
+                Span::styled("  name=url: ", Style::new().fg(theme().text)),
+                Span::styled(format!("{}▊", app.buf), Style::new().fg(theme().warning)),
             ]),
         ]
     } else {
@@ -905,7 +923,7 @@ fn render_profiles(f: &mut Frame, app: &App) {
     let items: Vec<Line> = if app.profiles.is_empty() {
         vec![Line::from(Span::styled(
             "  no profiles yet — press 'n' to save the current config",
-            Style::new().fg(DIM),
+            Style::new().fg(theme().dim),
         ))]
     } else {
         app.profiles
@@ -918,14 +936,14 @@ fn render_profiles(f: &mut Frame, app: &App) {
                     .unwrap_or("custom")
                     .to_string();
                 let style = if sel {
-                    Style::new().fg(ACCENT).add_modifier(Modifier::BOLD)
+                    Style::new().fg(theme().accent).add_modifier(Modifier::BOLD)
                 } else {
-                    Style::new().fg(Color::White)
+                    Style::new().fg(theme().text)
                 };
                 Line::from(vec![
                     Span::styled(prefix, style),
                     Span::styled(format!("{:<16}", p.name), style),
-                    Span::styled(moniker, Style::new().fg(DIM)),
+                    Span::styled(moniker, Style::new().fg(theme().dim)),
                 ])
             })
             .collect()
@@ -935,8 +953,8 @@ fn render_profiles(f: &mut Frame, app: &App) {
         vec![
             Line::from(""),
             Line::from(vec![
-                Span::styled("  name: ", Style::new().fg(Color::White)),
-                Span::styled(format!("{}▊", app.buf), Style::new().fg(Color::Yellow)),
+                Span::styled("  name: ", Style::new().fg(theme().text)),
+                Span::styled(format!("{}▊", app.buf), Style::new().fg(theme().warning)),
             ]),
         ]
     } else {
@@ -944,6 +962,45 @@ fn render_profiles(f: &mut Frame, app: &App) {
     };
 
     render_list(f, inner, vec![], items, app.prof_sel, footer);
+}
+
+fn render_themes(f: &mut Frame, app: &App) {
+    let names = theme::names();
+    let height = (names.len() as u16).clamp(1, 14) + 4;
+    let inner = modal(f, "themes", 48, height);
+
+    let swatch = |c: Color| Span::styled("●", Style::new().fg(c));
+    let items: Vec<Line> = names
+        .iter()
+        .enumerate()
+        .map(|(i, name)| {
+            let sel = i == app.theme_sel;
+            let prefix = if sel { " > " } else { "   " };
+            let style = if sel {
+                Style::new().fg(theme().accent).add_modifier(Modifier::BOLD)
+            } else {
+                Style::new().fg(theme().text)
+            };
+            // Preview each palette's key colors inline, regardless of the
+            // theme currently driving the rest of the UI.
+            let p = theme::resolve(name);
+            Line::from(vec![
+                Span::styled(prefix, style),
+                Span::styled(format!("{name:<12}"), style),
+                swatch(p.accent),
+                Span::raw(" "),
+                swatch(p.success),
+                Span::raw(" "),
+                swatch(p.warning),
+                Span::raw(" "),
+                swatch(p.error),
+                Span::raw(" "),
+                swatch(p.devnet),
+            ])
+        })
+        .collect();
+
+    render_list(f, inner, vec![], items, app.theme_sel, vec![]);
 }
 
 /// Render a modal body as: fixed header, a scrollable item list (kept in view

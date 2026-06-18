@@ -32,6 +32,13 @@ pub struct Telemetry {
     pub tps: u64,
 }
 
+/// SOL/USD spot price with its 24-hour change (percent).
+#[derive(Clone, Copy)]
+pub struct Price {
+    pub usd: f64,
+    pub change_24h: f64,
+}
+
 /// Slower-moving, cluster-specific stats (refreshed occasionally).
 #[derive(Clone, Default)]
 pub struct ClusterStats {
@@ -67,7 +74,7 @@ pub enum Response {
     Health(String, Health),
     Telemetry(String, Option<Telemetry>),
     Stats(String, Option<ClusterStats>),
-    Price(Option<f64>),
+    Price(Option<Price>),
     Balance(Balance),
     Notice(String),
 }
@@ -253,15 +260,17 @@ fn probe_stats(url: &str) -> Option<ClusterStats> {
     })
 }
 
-/// SOL/USD spot price from CoinGecko (best-effort; external API).
-fn fetch_sol_price() -> Option<f64> {
+/// SOL/USD spot price and 24h change from CoinGecko (best-effort; external API).
+fn fetch_sol_price() -> Option<Price> {
     let v: Value = agent()
-        .get("https://api.coingecko.com/api/v3/simple/price?ids=solana&vs_currencies=usd")
+        .get("https://api.coingecko.com/api/v3/simple/price?ids=solana&vs_currencies=usd&include_24hr_change=true")
         .call()
         .ok()?
         .into_json()
         .ok()?;
-    v["solana"]["usd"].as_f64()
+    let usd = v["solana"]["usd"].as_f64()?;
+    let change_24h = v["solana"]["usd_24h_change"].as_f64().unwrap_or(0.0);
+    Some(Price { usd, change_24h })
 }
 
 fn probe_tps(url: &str) -> u64 {

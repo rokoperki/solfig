@@ -4,11 +4,12 @@ mod endpoints;
 mod faucets;
 mod profiles;
 mod rpc;
+mod theme;
 mod ui;
 
 use app::App;
 use crossterm::event::{self, Event, KeyEventKind};
-use rpc::{Balance, ClusterStats, Health, Request, Response, Rpc, Telemetry};
+use rpc::{Balance, ClusterStats, Health, Price, Request, Response, Rpc, Telemetry};
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
@@ -27,7 +28,7 @@ fn main() -> anyhow::Result<()> {
     let mut balance = Balance::Unknown;
     let mut telemetry: Option<Telemetry> = None;
     let mut stats: Option<ClusterStats> = None;
-    let mut price: Option<f64> = None;
+    let mut price: Option<Price> = None;
 
     let mut term = ratatui::init();
     let result = run(
@@ -53,7 +54,7 @@ fn run(
     balance: &mut Balance,
     telemetry: &mut Option<Telemetry>,
     stats: &mut Option<ClusterStats>,
-    price: &mut Option<f64>,
+    price: &mut Option<Price>,
 ) -> anyhow::Result<()> {
     // Per-cluster caches so switching back shows last values instantly.
     let mut tele_cache: HashMap<String, Telemetry> = HashMap::new();
