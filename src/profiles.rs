@@ -8,10 +8,10 @@ pub struct Profile {
     pub cfg: SolanaConfig,
 }
 
-/// Where profile files live: `~/.config/solcfg/profiles`.
+/// Where profile files live: `~/.config/solfig/profiles`.
 pub fn profiles_dir() -> PathBuf {
     let mut p = dirs::home_dir().unwrap_or_default();
-    p.push(".config/solcfg/profiles");
+    p.push(".config/solfig/profiles");
     p
 }
 

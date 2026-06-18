@@ -10,7 +10,7 @@ pub struct Endpoint {
 
 fn file() -> PathBuf {
     let mut p = dirs::home_dir().unwrap_or_default();
-    p.push(".config/solcfg/endpoints.yml");
+    p.push(".config/solfig/endpoints.yml");
     p
 }
 

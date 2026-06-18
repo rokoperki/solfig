@@ -1,8 +1,8 @@
 [package]
-name = "solcfg"
+name = "solfig"
 version = "0.1.0"
 edition = "2021"
-description = "A TUI for editing the Solana CLI config"
+description = "SOLFIG — a TUI for the Solana CLI config"
 
 [dependencies]
 ratatui = "0.29"

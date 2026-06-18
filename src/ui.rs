@@ -1,6 +1,6 @@
 use crate::app::{App, Field, Mode, FIELDS};
 use crate::config::{self, COMMITMENTS, MONIKERS};
-use crate::rpc::{Balance, Health};
+use crate::rpc::{Balance, ClusterStats, Health, Telemetry};
 use ratatui::prelude::*;
 use ratatui::widgets::{
     Block, Borders, Clear, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, Wrap,
@@ -10,6 +10,18 @@ use std::path::Path;
 const ACCENT: Color = Color::Cyan;
 const DIM: Color = Color::DarkGray;
 const HIGHLIGHT: Color = Color::Rgb(38, 40, 56);
+
+/// ANSI Shadow "SOLFIG" wordmark.
+fn wordmark() -> [&'static str; 6] {
+    [
+        "███████╗ ██████╗ ██╗     ███████╗██╗ ██████╗",
+        "██╔════╝██╔═══██╗██║     ██╔════╝██║██╔════╝",
+        "███████╗██║   ██║██║     █████╗  ██║██║  ███╗",
+        "╚════██║██║   ██║██║     ██╔══╝  ██║██║   ██║",
+        "███████║╚██████╔╝███████╗██║     ██║╚██████╔╝",
+        "╚══════╝ ╚═════╝ ╚══════╝╚═╝     ╚═╝ ╚═════╝",
+    ]
+}
 
 /// Network-specific accent: a glance tells you which cluster you're on.
 fn cluster_color(url: &str) -> Color {
@@ -46,7 +58,15 @@ fn modal(f: &mut Frame, title: &str, width: u16, height: u16) -> Rect {
     inner
 }
 
-pub fn render(f: &mut Frame, app: &App, health: &Health, balance: &Balance) {
+pub fn render(
+    f: &mut Frame,
+    app: &App,
+    health: &Health,
+    balance: &Balance,
+    telemetry: &Option<Telemetry>,
+    stats: &Option<ClusterStats>,
+    price: &Option<f64>,
+) {
     let chunks = Layout::vertical([
         Constraint::Min(3),
         Constraint::Length(1),
@@ -54,7 +74,15 @@ pub fn render(f: &mut Frame, app: &App, health: &Health, balance: &Balance) {
     ])
     .split(f.area());
 
-    render_body(f, app, balance, chunks[0]);
+    // Split off a telemetry sidebar when the terminal is wide enough.
+    if chunks[0].width >= 90 {
+        let cols =
+            Layout::horizontal([Constraint::Min(50), Constraint::Length(26)]).split(chunks[0]);
+        render_body(f, app, balance, cols[0]);
+        render_sidebar(f, app, health, telemetry, stats, price, cols[1]);
+    } else {
+        render_body(f, app, balance, chunks[0]);
+    }
     render_status(f, app, health, chunks[1]);
     render_help(f, app, chunks[2]);
 
@@ -83,10 +111,10 @@ fn render_body(f: &mut Frame, app: &App, balance: &Balance, area: Rect) {
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(Style::new().fg(DIM))
-        .title(Line::from(vec![
-            Span::styled(" solcfg ", Style::new().fg(ACCENT).add_modifier(Modifier::BOLD)),
-            Span::styled(format!("· {} ", app.path.display()), Style::new().fg(DIM)),
-        ]))
+        .title(Span::styled(
+            format!(" {} ", app.path.display()),
+            Style::new().fg(DIM),
+        ))
         .title(
             Line::from(Span::styled(
                 format!(" {net} "),
@@ -102,6 +130,19 @@ fn render_body(f: &mut Frame, app: &App, balance: &Balance, area: Rect) {
 
     let inner_w = inner.width as usize;
     let mut lines: Vec<Line> = Vec::new();
+
+    // Compact wordmark (hidden on very short terminals to keep fields visible).
+    if inner.height >= 16 {
+        lines.push(Line::from(""));
+        for row in wordmark() {
+            lines.push(Line::from(Span::styled(
+                format!("  {row}"),
+                Style::new().fg(ACCENT).add_modifier(Modifier::BOLD),
+            )));
+        }
+    }
+    lines.push(Line::from(""));
+
     if net == "mainnet-beta" {
         lines.push(hazard_banner(inner_w));
     }
@@ -123,6 +164,194 @@ fn render_body(f: &mut Frame, app: &App, balance: &Balance, area: Rect) {
         lines.push(Line::from(""));
     }
     f.render_widget(Paragraph::new(lines), inner);
+}
+
+fn render_sidebar(
+    f: &mut Frame,
+    app: &App,
+    health: &Health,
+    telemetry: &Option<Telemetry>,
+    stats: &Option<ClusterStats>,
+    price: &Option<f64>,
+    area: Rect,
+) {
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::new().fg(DIM))
+        .title(Span::styled(
+            " cluster ",
+            Style::new().fg(ACCENT).add_modifier(Modifier::BOLD),
+        ));
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+    let w = inner.width as usize;
+
+    let kv = |label: &str, value: Span<'static>| {
+        Line::from(vec![
+            Span::styled(format!(" {label:<8}"), Style::new().fg(DIM)),
+            value,
+        ])
+    };
+
+    let net = config::moniker_for_url(&app.cfg.json_rpc_url).unwrap_or("custom");
+    let (ping, version) = match health {
+        Health::Ok { version, ms } => (format!("{ms}ms"), version.clone()),
+        Health::Checking => (spinner().to_string(), "…".to_string()),
+        Health::Err(_) => ("down".to_string(), "—".to_string()),
+        Health::Unknown => ("—".to_string(), "—".to_string()),
+    };
+
+    let mut lines = vec![
+        Line::from(""),
+        kv(
+            "network",
+            Span::styled(
+                net.to_string(),
+                Style::new()
+                    .fg(cluster_color(&app.cfg.json_rpc_url))
+                    .add_modifier(Modifier::BOLD),
+            ),
+        ),
+        Line::from(""),
+    ];
+
+    match telemetry {
+        Some(t) => {
+            lines.push(kv(
+                "slot",
+                Span::styled(group_thousands(t.slot), Style::new().fg(Color::White)),
+            ));
+            lines.push(kv(
+                "block",
+                Span::styled(
+                    group_thousands(t.block_height),
+                    Style::new().fg(Color::White),
+                ),
+            ));
+            lines.push(kv(
+                "epoch",
+                Span::styled(t.epoch.to_string(), Style::new().fg(Color::White)),
+            ));
+            let ratio = if t.slots_in_epoch > 0 {
+                t.slot_index as f64 / t.slots_in_epoch as f64
+            } else {
+                0.0
+            };
+            lines.push(Line::from(Span::styled(
+                format!(" {}", progress_bar(ratio, w.saturating_sub(2))),
+                Style::new().fg(ACCENT),
+            )));
+            let eta = format_eta(t.slots_in_epoch.saturating_sub(t.slot_index));
+            lines.push(kv("eta", Span::styled(eta, Style::new().fg(Color::White))));
+            lines.push(kv(
+                "tps",
+                Span::styled(group_thousands(t.tps), Style::new().fg(Color::White)),
+            ));
+        }
+        None => {
+            for k in ["slot", "block", "epoch", "eta", "tps"] {
+                lines.push(kv(k, Span::styled("—", Style::new().fg(DIM))));
+            }
+        }
+    }
+
+    lines.push(Line::from(""));
+    match stats {
+        Some(s) => {
+            lines.push(kv(
+                "nodes",
+                Span::styled(group_thousands(s.validators), Style::new().fg(Color::White)),
+            ));
+            lines.push(kv(
+                "txns",
+                Span::styled(abbrev(s.txn_count), Style::new().fg(Color::White)),
+            ));
+            let supply = if s.supply_sol > 0 {
+                format!("{} SOL", abbrev(s.supply_sol))
+            } else {
+                "—".to_string()
+            };
+            lines.push(kv(
+                "supply",
+                Span::styled(supply, Style::new().fg(Color::White)),
+            ));
+        }
+        None => {
+            for k in ["nodes", "txns", "supply"] {
+                lines.push(kv(k, Span::styled("—", Style::new().fg(DIM))));
+            }
+        }
+    }
+
+    // SOL price is global (not per-cluster), so it persists across switches.
+    let price_span = match price {
+        Some(p) => Span::styled(format!("${p:.2}"), Style::new().fg(Color::Green)),
+        None => Span::styled("—", Style::new().fg(DIM)),
+    };
+    lines.push(kv("SOL", price_span));
+
+    lines.push(Line::from(""));
+    lines.push(kv(
+        "ping",
+        Span::styled(ping, Style::new().fg(Color::White)),
+    ));
+    lines.push(kv(
+        "version",
+        Span::styled(version, Style::new().fg(Color::White)),
+    ));
+
+    f.render_widget(Paragraph::new(lines), inner);
+}
+
+/// Format a slot count as a rough epoch ETA (slots × ~0.4s).
+fn format_eta(slots: u64) -> String {
+    let secs = (slots as f64 * 0.4) as u64;
+    let (d, h, m) = (secs / 86400, (secs % 86400) / 3600, (secs % 3600) / 60);
+    if d > 0 {
+        format!("{d}d {h}h")
+    } else if h > 0 {
+        format!("{h}h {m}m")
+    } else {
+        format!("{m}m")
+    }
+}
+
+/// Abbreviate large counts: 1.23B / 4.56M / else thousands-separated.
+fn abbrev(n: u64) -> String {
+    if n >= 1_000_000_000 {
+        format!("{:.2}B", n as f64 / 1e9)
+    } else if n >= 1_000_000 {
+        format!("{:.2}M", n as f64 / 1e6)
+    } else {
+        group_thousands(n)
+    }
+}
+
+/// `▓▓▓░░░ 42%` style progress bar filling the given width.
+fn progress_bar(ratio: f64, width: usize) -> String {
+    let label = format!(" {:>3.0}%", (ratio * 100.0).clamp(0.0, 100.0));
+    let bar_w = width.saturating_sub(label.chars().count());
+    let filled = ((ratio * bar_w as f64).round() as usize).min(bar_w);
+    format!(
+        "{}{}{}",
+        "▓".repeat(filled),
+        "░".repeat(bar_w - filled),
+        label
+    )
+}
+
+/// Format a number with thousands separators.
+fn group_thousands(n: u64) -> String {
+    let s = n.to_string();
+    let len = s.len();
+    let mut out = String::new();
+    for (i, c) in s.chars().enumerate() {
+        if i > 0 && (len - i) % 3 == 0 {
+            out.push(',');
+        }
+        out.push(c);
+    }
+    out
 }
 
 /// Full-width red warning bar shown when the active cluster is mainnet.
@@ -175,7 +404,9 @@ fn field_lines<'a>(
 fn balance_span(balance: &Balance) -> Span<'static> {
     match balance {
         Balance::Unknown => Span::raw(""),
-        Balance::Loading => Span::styled(format!("  ◎ {}", spinner()), Style::new().fg(Color::Yellow)),
+        Balance::Loading => {
+            Span::styled(format!("  ◎ {}", spinner()), Style::new().fg(Color::Yellow))
+        }
         Balance::Lamports(l) => Span::styled(
             format!("  ◎ {:.4} SOL", *l as f64 / 1_000_000_000.0),
             Style::new().fg(Color::Green),
@@ -188,7 +419,7 @@ fn balance_span(balance: &Balance) -> Span<'static> {
 }
 
 fn radio(name: &str, active_url: &str, on: bool) -> Span<'static> {
-    let bullet = if on { "(●) " } else { "( ) " };
+    let bullet = if on { "● " } else { "○ " };
     let style = if on {
         Style::new()
             .fg(cluster_color(active_url))
@@ -199,6 +430,15 @@ fn radio(name: &str, active_url: &str, on: bool) -> Span<'static> {
     Span::styled(format!("{bullet}{name}   "), style)
 }
 
+/// Shorten built-in moniker names so the radio row fits a narrow pane.
+fn short_net(name: &str) -> &str {
+    match name {
+        "mainnet-beta" => "mainnet",
+        "localhost" => "local",
+        other => other,
+    }
+}
+
 fn cluster_lines(app: &App, focused: bool, editing: bool) -> Vec<Line<'static>> {
     let list = app.clusters();
     let active = list.iter().position(|(_, u)| *u == app.cfg.json_rpc_url);
@@ -206,7 +446,11 @@ fn cluster_lines(app: &App, focused: bool, editing: bool) -> Vec<Line<'static>> 
 
     let mut head = vec![marker(focused), label("Cluster", focused)];
     for (i, (name, _)) in list.iter().take(moniker_count).enumerate() {
-        head.push(radio(name, &app.cfg.json_rpc_url, active == Some(i)));
+        head.push(radio(
+            short_net(name),
+            &app.cfg.json_rpc_url,
+            active == Some(i),
+        ));
     }
     let mut lines = vec![Line::from(head)];
 
@@ -243,7 +487,11 @@ fn keypair_lines(app: &App, focused: bool, balance: &Balance) -> Vec<Line<'stati
 
     let detail = match config::pubkey_from_keypair(&app.cfg.keypair_path) {
         Some(pk) => {
-            let short = format!("{}...{}", &pk[..4.min(pk.len())], &pk[pk.len().saturating_sub(4)..]);
+            let short = format!(
+                "{}...{}",
+                &pk[..4.min(pk.len())],
+                &pk[pk.len().saturating_sub(4)..]
+            );
             Line::from(vec![
                 Span::styled("              └ ", Style::new().fg(DIM)),
                 Span::styled(short, Style::new().fg(Color::Green)),
@@ -252,7 +500,10 @@ fn keypair_lines(app: &App, focused: bool, balance: &Balance) -> Vec<Line<'stati
         }
         None => Line::from(vec![
             Span::styled("              └ ", Style::new().fg(DIM)),
-            Span::styled("no readable keypair at this path", Style::new().fg(Color::Red)),
+            Span::styled(
+                "no readable keypair at this path",
+                Style::new().fg(Color::Red),
+            ),
         ]),
     };
     vec![head, detail]
@@ -295,7 +546,11 @@ fn websocket_lines(app: &App, focused: bool, editing: bool) -> Vec<Line<'static>
 fn render_status(f: &mut Frame, app: &App, health: &Health, area: Rect) {
     let (dot, text, color) = match health {
         Health::Unknown => ("○".to_string(), "no endpoint".to_string(), DIM),
-        Health::Checking => (spinner().to_string(), "checking…".to_string(), Color::Yellow),
+        Health::Checking => (
+            spinner().to_string(),
+            "checking…".to_string(),
+            Color::Yellow,
+        ),
         Health::Ok { version, ms } => (
             "●".to_string(),
             format!("reachable · v{version} · {ms}ms"),
@@ -367,7 +622,10 @@ fn render_key_picker(f: &mut Frame, app: &App) {
     let header = vec![
         Line::from(vec![
             Span::styled(" search: ", Style::new().fg(ACCENT)),
-            Span::styled(format!("{}▊", app.key_filter), Style::new().fg(Color::Yellow)),
+            Span::styled(
+                format!("{}▊", app.key_filter),
+                Style::new().fg(Color::Yellow),
+            ),
         ]),
         Line::from(Span::styled(
             "─".repeat(inner.width as usize),
@@ -394,8 +652,11 @@ fn render_key_picker(f: &mut Frame, app: &App) {
                     Style::new().fg(Color::White)
                 };
                 let pk = &kf.pubkey;
-                let short =
-                    format!("{}...{}", &pk[..4.min(pk.len())], &pk[pk.len().saturating_sub(4)..]);
+                let short = format!(
+                    "{}...{}",
+                    &pk[..4.min(pk.len())],
+                    &pk[pk.len().saturating_sub(4)..]
+                );
                 Line::from(vec![
                     Span::styled(prefix, style),
                     Span::styled(format!("{:<40}", kf.display), style),
@@ -453,7 +714,7 @@ fn render_endpoints(f: &mut Frame, app: &App) {
 }
 
 fn render_help_panel(f: &mut Frame) {
-    let inner = modal(f, "solcfg · keybindings", 64, 26);
+    let inner = modal(f, "SOLFIG · keybindings", 64, 26);
 
     let section = |title: &str| {
         Line::from(Span::styled(
@@ -538,7 +799,10 @@ fn render_transfer(f: &mut Frame, app: &App) {
                 Style::new().fg(Color::White),
             ));
             if let Some(name) = app.recipient_local_name() {
-                to_spans.push(Span::styled(format!("  ({name})"), Style::new().fg(Color::Green)));
+                to_spans.push(Span::styled(
+                    format!("  ({name})"),
+                    Style::new().fg(Color::Green),
+                ));
             }
         }
         lines.push(Line::from(to_spans));

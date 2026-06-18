@@ -10,7 +10,7 @@ pub struct Faucet {
 
 fn file() -> PathBuf {
     let mut p = dirs::home_dir().unwrap_or_default();
-    p.push(".config/solcfg/faucets.yml");
+    p.push(".config/solfig/faucets.yml");
     p
 }
 

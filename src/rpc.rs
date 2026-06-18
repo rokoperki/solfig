@@ -21,9 +21,31 @@ pub enum Balance {
     Err(String),
 }
 
+/// Fast-moving cluster telemetry (refreshed often).
+#[derive(Clone, Default)]
+pub struct Telemetry {
+    pub slot: u64,
+    pub epoch: u64,
+    pub slot_index: u64,
+    pub slots_in_epoch: u64,
+    pub block_height: u64,
+    pub tps: u64,
+}
+
+/// Slower-moving, cluster-specific stats (refreshed occasionally).
+#[derive(Clone, Default)]
+pub struct ClusterStats {
+    pub validators: u64,
+    pub txn_count: u64,
+    pub supply_sol: u64,
+}
+
 /// A unit of work for the background worker.
 pub enum Request {
     Version(String),
+    Telemetry(String),
+    Stats(String),
+    Price,
     Balance { url: String, pubkey: String },
     Airdrop {
         url: String,
@@ -41,44 +63,72 @@ pub enum Request {
 
 /// An update produced by the background worker.
 pub enum Response {
-    Health(Health),
+    // The leading String is the RPC URL the result is for (used for caching).
+    Health(String, Health),
+    Telemetry(String, Option<Telemetry>),
+    Stats(String, Option<ClusterStats>),
+    Price(Option<f64>),
     Balance(Balance),
     Notice(String),
 }
 
 /// Background worker that runs RPC probes off the UI thread.
+///
+/// Balance has its own dedicated thread so it is fetched with top priority and
+/// never waits behind slow telemetry/stats/price probes on the general worker.
 pub struct Rpc {
-    req_tx: Sender<Request>,
+    gen_tx: Sender<Request>,
+    bal_tx: Sender<Request>,
     res_rx: Receiver<Response>,
 }
 
 impl Rpc {
     pub fn new() -> Self {
-        let (req_tx, req_rx) = channel::<Request>();
+        let (gen_tx, gen_rx) = channel::<Request>();
+        let (bal_tx, bal_rx) = channel::<Request>();
         let (res_tx, res_rx) = channel::<Response>();
+
+        // Dedicated balance worker — always responsive.
+        let bal_res = res_tx.clone();
         thread::spawn(move || {
-            while let Ok(first) = req_rx.recv() {
-                // Collapse a burst of version/balance requests to the latest of
-                // each kind; airdrops are side-effecting so every one is kept.
+            while let Ok(first) = bal_rx.recv() {
+                // Keep only the most recent balance request.
+                let mut latest = first;
+                while let Ok(next) = bal_rx.try_recv() {
+                    latest = next;
+                }
+                if let Request::Balance { url, pubkey } = latest {
+                    let _ = bal_res.send(Response::Balance(Balance::Loading));
+                    let _ = bal_res.send(Response::Balance(probe_balance(&url, &pubkey)));
+                }
+            }
+        });
+
+        // General worker — everything else.
+        thread::spawn(move || {
+            while let Ok(first) = gen_rx.recv() {
                 let mut latest_version: Option<String> = None;
-                let mut latest_balance: Option<(String, String)> = None;
+                let mut latest_telemetry: Option<String> = None;
+                let mut latest_stats: Option<String> = None;
+                let mut want_price = false;
                 let mut airdrops: Vec<(String, String, u64)> = Vec::new();
                 let mut transfers: Vec<Request> = Vec::new();
                 let mut cur = Some(first);
                 while let Some(req) = cur.take() {
                     match req {
                         Request::Version(url) => latest_version = Some(url),
-                        Request::Balance { url, pubkey } => {
-                            latest_balance = Some((url, pubkey))
-                        }
+                        Request::Telemetry(url) => latest_telemetry = Some(url),
+                        Request::Stats(url) => latest_stats = Some(url),
+                        Request::Price => want_price = true,
                         Request::Airdrop {
                             url,
                             pubkey,
                             lamports,
                         } => airdrops.push((url, pubkey, lamports)),
                         t @ Request::Transfer { .. } => transfers.push(t),
+                        Request::Balance { .. } => {} // handled by the balance thread
                     }
-                    cur = req_rx.try_recv().ok();
+                    cur = gen_rx.try_recv().ok();
                 }
                 for (url, pubkey, lamports) in airdrops {
                     run_airdrop(&res_tx, &url, &pubkey, lamports);
@@ -96,20 +146,38 @@ impl Rpc {
                     }
                 }
                 if let Some(url) = latest_version {
-                    let _ = res_tx.send(Response::Health(Health::Checking));
-                    let _ = res_tx.send(Response::Health(probe_version(&url)));
+                    let _ = res_tx.send(Response::Health(url.clone(), Health::Checking));
+                    let h = probe_version(&url);
+                    let _ = res_tx.send(Response::Health(url, h));
                 }
-                if let Some((url, pubkey)) = latest_balance {
-                    let _ = res_tx.send(Response::Balance(Balance::Loading));
-                    let _ = res_tx.send(Response::Balance(probe_balance(&url, &pubkey)));
+                if let Some(url) = latest_telemetry {
+                    let t = probe_telemetry(&url);
+                    let _ = res_tx.send(Response::Telemetry(url, t));
+                }
+                if let Some(url) = latest_stats {
+                    let s = probe_stats(&url);
+                    let _ = res_tx.send(Response::Stats(url, s));
+                }
+                if want_price {
+                    let _ = res_tx.send(Response::Price(fetch_sol_price()));
                 }
             }
         });
-        Self { req_tx, res_rx }
+
+        Self {
+            gen_tx,
+            bal_tx,
+            res_rx,
+        }
     }
 
     pub fn request(&self, req: Request) {
-        let _ = self.req_tx.send(req);
+        let tx = if matches!(req, Request::Balance { .. }) {
+            &self.bal_tx
+        } else {
+            &self.gen_tx
+        };
+        let _ = tx.send(req);
     }
 
     pub fn poll(&self) -> Option<Response> {
@@ -147,6 +215,68 @@ fn probe_version(url: &str) -> Health {
             }
         }
         Err(e) => Health::Err(e),
+    }
+}
+
+fn probe_telemetry(url: &str) -> Option<Telemetry> {
+    let epoch = rpc_call(url, "getEpochInfo", json!([])).ok()?;
+    let e = &epoch["result"];
+    let slot = e["absoluteSlot"].as_u64()?;
+    Some(Telemetry {
+        slot,
+        epoch: e["epoch"].as_u64().unwrap_or(0),
+        slot_index: e["slotIndex"].as_u64().unwrap_or(0),
+        slots_in_epoch: e["slotsInEpoch"].as_u64().unwrap_or(0),
+        block_height: e["blockHeight"].as_u64().unwrap_or(0),
+        tps: probe_tps(url),
+    })
+}
+
+fn probe_stats(url: &str) -> Option<ClusterStats> {
+    let validators = rpc_call(url, "getClusterNodes", json!([]))
+        .ok()
+        .and_then(|v| v["result"].as_array().map(|a| a.len() as u64))
+        .unwrap_or(0);
+    let txn_count = rpc_call(url, "getTransactionCount", json!([]))
+        .ok()
+        .and_then(|v| v["result"].as_u64())
+        .unwrap_or(0);
+    let supply_sol = rpc_call(url, "getSupply", json!([]))
+        .ok()
+        .and_then(|v| v["result"]["value"]["circulating"].as_u64())
+        .map(|l| l / 1_000_000_000)
+        .unwrap_or(0);
+    Some(ClusterStats {
+        validators,
+        txn_count,
+        supply_sol,
+    })
+}
+
+/// SOL/USD spot price from CoinGecko (best-effort; external API).
+fn fetch_sol_price() -> Option<f64> {
+    let v: Value = agent()
+        .get("https://api.coingecko.com/api/v3/simple/price?ids=solana&vs_currencies=usd")
+        .call()
+        .ok()?
+        .into_json()
+        .ok()?;
+    v["solana"]["usd"].as_f64()
+}
+
+fn probe_tps(url: &str) -> u64 {
+    match rpc_call(url, "getRecentPerformanceSamples", json!([1])) {
+        Ok(v) => {
+            let s = &v["result"][0];
+            let n = s["numTransactions"].as_u64().unwrap_or(0);
+            let p = s["samplePeriodSecs"].as_u64().unwrap_or(0);
+            if p > 0 {
+                n / p
+            } else {
+                0
+            }
+        }
+        Err(_) => 0,
     }
 }
 
